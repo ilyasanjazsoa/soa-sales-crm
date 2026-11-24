@@ -6,6 +6,8 @@ import { ApiError } from "./api";
 import { Layout } from "./Layout";
 import { AdminPage } from "./pages/Admin";
 import { AccountPage } from "./pages/AccountPage";
+import { AskPage } from "./pages/Ask";
+import { TodayPage } from "./pages/Today";
 import { CalendarPage } from "./pages/CalendarPage";
 import { AdminPricingPage } from "./pages/AdminPricing";
 import { AdminReferencesPage } from "./pages/AdminReferences";
@@ -40,30 +42,12 @@ const router = createBrowserRouter([
     path: "/",
     element: <Layout />,
     children: [
-      {
-        index: true,
-        element: (
-          <ComingPage
-            title="Today"
-            milestone={7}
-            what="Your next best actions, today's schedule and this week's numbers."
-          />
-        ),
-      },
+      { index: true, element: <TodayPage /> },
       { path: "prospects", element: <ProspectsPage /> },
       { path: "accounts/:id", element: <AccountPage /> },
       { path: "pipeline", element: <PipelinePage /> },
       { path: "calendar", element: <CalendarPage /> },
-      {
-        path: "ask",
-        element: (
-          <ComingPage
-            title="Ask Sales AI"
-            milestone={7}
-            what="Ask questions about your pipeline, answered from CRM data."
-          />
-        ),
-      },
+      { path: "ask", element: <AskPage /> },
       { path: "settings", element: <SettingsPage /> },
       {
         path: "admin",
