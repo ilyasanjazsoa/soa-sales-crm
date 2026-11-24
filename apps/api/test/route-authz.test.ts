@@ -363,6 +363,11 @@ const ROUTES: Record<string, RouteCase> = {
     path: (ctx) => `/api/drafts/${ctx.ae1DraftId}`,
     asOtherAe: expectNotFound,
   },
+  "POST /api/drafts/:id/claims": {
+    access: "session",
+    path: (ctx) => `/api/drafts/${ctx.ae1DraftId}/claims`,
+    asOtherAe: expectNotFound,
+  },
   "POST /api/drafts/:id/regenerate": {
     access: "session",
     path: (ctx) => `/api/drafts/${ctx.ae1DraftId}/regenerate`,

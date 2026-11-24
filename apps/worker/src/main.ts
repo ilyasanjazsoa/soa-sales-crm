@@ -19,6 +19,7 @@ import {
   runResearchFetch,
   runMailSend,
   runMailSync,
+  sweepStuckMail,
   syncableUsers,
   systemClock,
 } from "@soa/api/jobs";
@@ -44,7 +45,7 @@ const config = loadConfig();
 const log = pino({ name: "worker", level: config.LOG_LEVEL ?? "info" });
 const database = createDb(config.DATABASE_URL, { role: APP_ROLE });
 const store = createS3ObjectStore(config);
-const queue = await createPgBossQueue(config.DATABASE_URL);
+const queue = await createPgBossQueue(config.DATABASE_URL, { supervise: true });
 
 // Log what failed, never the message: errors can carry job data (CLAUDE.md rule 8).
 const failure = (error: unknown) => {
@@ -129,6 +130,8 @@ await queue.boss.work<{ userId: string }>(JOBS.mailSync, async (jobs) => {
 const SYNC_EVERY_MS = 2 * 60 * 1000;
 const tick = async () => {
   try {
+    const swept = await sweepStuckMail(database.db, systemClock());
+    if (swept > 0) log.warn({ job: "mail sweep", swept }, "stuck messages marked failed");
     for (const userId of await syncableUsers(database.db)) await queue.send(JOBS.mailSync, { userId });
   } catch (error) {
     log.error({ job: "mail.sync tick", err: failure(error) }, "tick failed");

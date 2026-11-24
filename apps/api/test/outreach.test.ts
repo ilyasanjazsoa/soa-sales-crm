@@ -9,7 +9,8 @@ import { createMemoryQueue } from "../src/jobs/queue";
 import { createAiClient } from "../src/providers/ai/client";
 import { createFakeAiAdapter } from "../src/providers/ai/fake";
 import { createMemoryMailProvider } from "../src/providers/mail/memory";
-import { runMailSend, runMailSync, syncableUsers } from "../src/services/mail-jobs";
+import { MailRetryableError } from "../src/providers/mail/types";
+import { runMailSend, runMailSync, sweepStuckMail, syncableUsers } from "../src/services/mail-jobs";
 import { testDatabaseUrl } from "./db-setup";
 import { createUser, ownerQuery, resetDatabase, signIn, testApp, type SignedIn, type TestUser } from "./helpers";
 
@@ -84,6 +85,8 @@ async function runWorker(options: { finalAttempt?: boolean } = {}) {
     }
     return {
       sync: (userId: string) => runMailSync(deps, { userId }),
+      send: (messageId: string, finalAttempt = false) => runMailSend(deps, { messageId }, { finalAttempt }),
+      sweep: (now: Date) => sweepStuckMail(handle.db, now),
       syncable: () => syncableUsers(handle.db),
       close: () => handle.close(),
     };
@@ -141,6 +144,24 @@ describe("drafts", () => {
       payload: { subject: "Night coverage", body: "Hi Dana, a short note." },
     });
     expect(Draft.parse(saved.json()).checks.every((check) => check.pass)).toBe(true);
+  });
+
+  it("checks the wording again on request after the rep edits it", async () => {
+    const draft = await createDraft();
+    const edited = Draft.parse(
+      (
+        await app.inject({
+          method: "PATCH",
+          url: `/api/drafts/${draft.id}`,
+          ...as(),
+          payload: { body: "We guarantee 100% coverage, unlike your unreliable current guards." },
+        })
+      ).json(),
+    );
+    expect(edited.checks.some((check) => check.id === "claims")).toBe(false); // the old result no longer applies
+    const checked = await app.inject({ method: "POST", url: `/api/drafts/${draft.id}/claims`, ...as() });
+    const claims = Draft.parse(checked.json()).checks.find((check) => check.id === "claims");
+    expect(claims).toMatchObject({ pass: false, blocking: false });
   });
 
   it("logs a call, and refuses a LinkedIn note over 300 characters", async () => {
@@ -303,6 +324,7 @@ describe("sending (§8.2)", () => {
     expect(timeline.at(-1)?.subject).toContain("Email not sent");
 
     await ownerQuery("UPDATE email_messages SET to_email = 'dana@harbor.example'");
+    await ownerQuery("UPDATE contacts SET email = 'dana@harbor.example'");
     const retry = await app.inject({ method: "POST", url: `/api/emails/${failed?.id ?? ""}/retry`, ...as() });
     expect(retry.statusCode).toBe(202);
     await sendJobs();
@@ -471,7 +493,9 @@ describe("unsubscribe, replies and bounces (§8.4)", () => {
     const worker = await runWorker();
     await worker.sync(ae.id);
     await worker.close();
-    expect(await ownerQuery("SELECT status FROM email_messages")).toEqual([{ status: "bounced" }]);
+    expect(await ownerQuery("SELECT status FROM email_messages WHERE direction = 'out'")).toEqual([
+      { status: "bounced" },
+    ]);
     expect(await ownerQuery("SELECT email_status FROM contacts")).toEqual([{ email_status: "bounced" }]);
     expect(await ownerQuery("SELECT email, reason FROM suppressions")).toEqual([
       { email: "dana@harbor.example", reason: "bounce" },
@@ -540,5 +564,171 @@ describe("suppressions admin", () => {
       "SELECT action FROM audit_log WHERE action LIKE 'suppression.%'",
     );
     expect(audit.map((row) => row.action).sort()).toEqual(["suppression.add", "suppression.remove"]);
+  });
+});
+
+describe("review fixes: at most once, no stuck messages, Retry re-checks", () => {
+  const queueOne = async () => {
+    const draft = await createDraft();
+    expect((await send(draft.id)).statusCode).toBe(202);
+    const [job] = queue.sent.splice(0);
+    return (job?.data as { messageId: string }).messageId;
+  };
+  const status = async () =>
+    (
+      await ownerQuery<{ status: string; error: string | null }>(
+        "SELECT status, error FROM email_messages WHERE direction = 'out'",
+      )
+    )[0];
+
+  it("retries only when nothing was sent, and fails on the last attempt", async () => {
+    const id = await queueOne();
+    const worker = await runWorker();
+    mailbox.state.nextSendError = new MailRetryableError("busy");
+    await expect(worker.send(id)).rejects.toThrow("busy");
+    expect(await status()).toMatchObject({ status: "queued" }); // claim released for the retry
+    await worker.send(id);
+    expect(mailbox.sent).toHaveLength(1);
+    expect(await status()).toMatchObject({ status: "sent" });
+
+    const second = await queueOne();
+    mailbox.state.nextSendError = new MailRetryableError("busy");
+    await worker.send(second, true);
+    await worker.close();
+    const [failed] = await ownerQuery<{ status: string; error: string }>(
+      "SELECT status, error FROM email_messages WHERE id = $1",
+      [second],
+    );
+    expect(failed).toMatchObject({ status: "failed", error: expect.stringContaining("several tries") as string });
+  });
+
+  it("never sends again automatically when delivery is unknown", async () => {
+    const id = await queueOne();
+    const worker = await runWorker();
+    mailbox.state.nextSendError = new Error("socket hang up after /send");
+    await worker.send(id); // no throw: pg-boss must not retry
+    await worker.send(id); // a duplicate job finds nothing to send
+    await worker.close();
+    expect(mailbox.sent).toHaveLength(0);
+    expect(await status()).toMatchObject({ status: "failed", error: expect.stringContaining("Sent Items") as string });
+  });
+
+  it("a duplicate job can't send a claimed message, and the sweeper fails messages nobody finished", async () => {
+    const id = await queueOne();
+    await ownerQuery("UPDATE email_messages SET sent_at = now() - interval '20 minutes' WHERE id = $1", [id]);
+    const worker = await runWorker();
+    await worker.send(id);
+    expect(mailbox.sent).toHaveLength(0);
+    expect(await worker.sweep(new Date())).toBe(1);
+    await worker.close();
+    expect(await status()).toMatchObject({ status: "failed" });
+    const retry = await app.inject({ method: "POST", url: `/api/emails/${id}/retry`, ...as() });
+    expect(retry.statusCode).toBe(202);
+  });
+
+  it("Retry runs the checks again and counts against the daily cap", async () => {
+    await ownerQuery("UPDATE contacts SET email = 'dana@harbor.invalid'");
+    const id = await queueOne();
+    const worker = await runWorker();
+    await worker.send(id);
+    await worker.close();
+    await ownerQuery("UPDATE contacts SET email = 'dana@harbor.example'");
+    await ownerQuery("UPDATE email_messages SET to_email = 'dana@harbor.example'");
+
+    await ownerQuery("UPDATE accounts SET do_not_contact = true");
+    const blocked = await app.inject({ method: "POST", url: `/api/emails/${id}/retry`, ...as() });
+    expect(blocked.statusCode, blocked.body).toBe(422);
+    expect(blocked.body).toContain("do not contact");
+    await ownerQuery("UPDATE accounts SET do_not_contact = false");
+
+    await ownerQuery(
+      `INSERT INTO email_messages (user_id, account_id, direction, status, provider, from_email, to_email, subject, body_text)
+       SELECT $1, $2, 'out', 'sent', 'microsoft', 'priya@soa.example', 'someone@other.example', 'Hi', 'Body' FROM generate_series(1, 50)`,
+      [ae.id, accountId],
+    );
+    expect((await app.inject({ method: "POST", url: `/api/emails/${id}/retry`, ...as() })).statusCode).toBe(429);
+  });
+
+  it("the job refuses a message whose account became do-not-contact after the click", async () => {
+    const id = await queueOne();
+    await ownerQuery("UPDATE accounts SET do_not_contact = true");
+    const worker = await runWorker();
+    await worker.send(id);
+    await worker.close();
+    expect(mailbox.sent).toHaveLength(0);
+    expect(await status()).toMatchObject({ status: "failed" });
+  });
+
+  it("acts on a plain-words unsubscribe even when the AI is down, and classifies it on a later sync", async () => {
+    const draft = await createDraft();
+    await send(draft.id);
+    await sendJobs();
+    const [thread] = await ownerQuery<{ provider_thread_id: string }>("SELECT provider_thread_id FROM email_messages");
+    mailbox.inbox.push({
+      providerMessageId: "<stop@harbor.example>",
+      providerThreadId: thread?.provider_thread_id ?? "",
+      fromEmail: "dana@harbor.example",
+      toEmail: "priya@soa.example",
+      subject: "Re: hello",
+      text: "Please stop emailing me.",
+      receivedAt: new Date(),
+      bounce: false,
+    });
+    await ownerQuery(
+      "INSERT INTO ai_calls (user_id, feature, model, ok, request) SELECT $1, 'research_brief', 'w', true, '{}' FROM generate_series(1, 200)",
+      [ae.id],
+    ); // today's AI limit is used up
+    const worker = await runWorker();
+    await worker.sync(ae.id);
+    expect(await ownerQuery("SELECT reason FROM suppressions")).toEqual([{ reason: "unsubscribe" }]);
+    expect(await ownerQuery("SELECT ai_classification FROM email_messages WHERE direction = 'in'")).toEqual([
+      { ai_classification: null },
+    ]);
+    await ownerQuery("DELETE FROM ai_calls WHERE feature = 'research_brief'");
+    await worker.sync(ae.id);
+    await worker.close();
+    expect(await ownerQuery("SELECT ai_classification FROM email_messages WHERE direction = 'in'")).toEqual([
+      { ai_classification: "unsubscribe" },
+    ]);
+  });
+
+  it("processes a bounce notice once, however often it is synced", async () => {
+    const draft = await createDraft();
+    await send(draft.id);
+    await sendJobs();
+    const [thread] = await ownerQuery<{ provider_thread_id: string }>("SELECT provider_thread_id FROM email_messages");
+    const notice = {
+      providerMessageId: "<ndr-1@soa.example>",
+      providerThreadId: thread?.provider_thread_id ?? "",
+      fromEmail: "postmaster@soa.example",
+      toEmail: "priya@soa.example",
+      subject: "Undeliverable: hello",
+      text: "",
+      receivedAt: new Date(),
+      bounce: true,
+    };
+    mailbox.inbox.push(notice);
+    const worker = await runWorker();
+    await worker.sync(ae.id);
+    mailbox.inbox.push(notice); // the provider reports it again (e.g. marked read)
+    await worker.sync(ae.id);
+    await worker.close();
+    expect(await ownerQuery("SELECT id FROM activities WHERE meta->>'bounce' = 'true'")).toHaveLength(1);
+  });
+
+  it("records which address a manager added or removed", async () => {
+    const manager = await createUser("max@soa.example", "manager");
+    const managerSession = await signIn(app, manager.email);
+    await app.inject({
+      method: "POST",
+      url: "/api/suppressions",
+      ...as(managerSession),
+      payload: { email: "x@y.example" },
+    });
+    await app.inject({ method: "DELETE", url: "/api/suppressions/x@y.example", ...as(managerSession) });
+    const audit = await ownerQuery<{ meta: { email: string } }>(
+      "SELECT meta FROM audit_log WHERE action LIKE 'suppression.%'",
+    );
+    expect(audit.map((row) => row.meta.email)).toEqual(["x@y.example", "x@y.example"]);
   });
 });

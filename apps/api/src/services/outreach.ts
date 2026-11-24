@@ -119,11 +119,10 @@ export function createOutreachService(deps: {
     contact: ContactRow,
     claims: CheckResult | undefined,
   ): Promise<CheckResult[]> => {
-    const [account, suppression, references] = await Promise.all([
-      accountsRepo(tx).get(scope, draft.accountId),
-      contact.email === null ? Promise.resolve(null) : suppressionListRepo(tx).reason(scope, contact.email),
-      referencesRepo(tx).allForChecks(scope),
-    ]);
+    // One after another: a transaction's connection runs one query at a time.
+    const account = await accountsRepo(tx).get(scope, draft.accountId);
+    const suppression = contact.email === null ? null : await suppressionListRepo(tx).reason(scope, contact.email);
+    const references = await referencesRepo(tx).allForChecks(scope);
     const results = runChecks({
       channel: draft.channel,
       subject: draft.subject,
@@ -214,6 +213,17 @@ export function createOutreachService(deps: {
     });
     const subject = input.channel === "email" ? (result.data.subject ?? "").trim() : null;
     const body = result.data.body.trim();
+    const claims = await claimsCheck(scope, input.channel, subject, body);
+    return { subject, body, aiCallId: result.aiCallId, claims };
+  };
+
+  /** claim_check on a text (advisory: undefined when the AI couldn't answer). */
+  const claimsCheck = async (
+    scope: UserScope,
+    channel: DraftRow["channel"],
+    subject: string | null,
+    body: string,
+  ): Promise<CheckResult | undefined> => {
     let claims: CheckResult | undefined;
     try {
       const flags = (
@@ -226,7 +236,7 @@ export function createOutreachService(deps: {
         })
       ).data;
       claims = runChecks({
-        channel: input.channel,
+        channel,
         subject,
         body,
         isReply: false,
@@ -240,7 +250,7 @@ export function createOutreachService(deps: {
     } catch {
       claims = undefined; // advisory only: the draft is still usable without it
     }
-    return { subject, body, aiCallId: result.aiCallId, claims };
+    return claims;
   };
 
   const loadOwn = async (tx: Executor, scope: UserScope, id: string) => {
@@ -322,6 +332,31 @@ export function createOutreachService(deps: {
       });
     },
 
+    /** Runs claim_check on the text as it is now (after the rep's edits) and stores the warning with the checks. */
+    async checkClaims(scope: UserScope, id: string): Promise<Draft> {
+      const row = await loadOwn(db, scope, id);
+      if (row.draft.status !== "draft") throw conflict("not_a_draft", "This message was already sent or logged.");
+      await ai.assertWithinLimit(scope.userId);
+      const claims = await claimsCheck(scope, row.draft.channel, row.draft.subject, row.draft.body);
+      if (claims === undefined) throw new HttpError(503, "ai_unavailable", "The wording check didn't run. Try again.");
+      return db.transaction(async (tx) => {
+        const locked = await draftsRepo(tx).lockForSend(scope, id);
+        if (locked?.draft.status !== "draft") throw conflict("not_a_draft", "This message was already sent or logged.");
+        // Only if the text is still what was checked.
+        const same = locked.draft.subject === row.draft.subject && locked.draft.body === row.draft.body;
+        const checks = await checksFor(
+          tx,
+          scope,
+          locked.draft,
+          locked.contact,
+          same ? claims : storedClaims(locked.draft),
+        );
+        const updated = await draftsRepo(tx).update(scope, id, { checks });
+        if (updated === undefined) throw notFound();
+        return toDraft(tx, scope, updated, locked.contact);
+      });
+    },
+
     async regenerate(scope: UserScope, id: string): Promise<Draft> {
       const row = await loadOwn(db, scope, id);
       if (row.draft.status !== "draft") throw conflict("not_a_draft", "This message was already sent or logged.");
@@ -348,7 +383,11 @@ export function createOutreachService(deps: {
     },
 
     /** The single send path (§8.2). One transaction; the message is queued, and the mail.send job sends it. */
-    async send(scope: UserScope, id: string, ip: string | null): Promise<{ messageId: string; status: "queued" }> {
+    async send(
+      scope: UserScope,
+      id: string,
+      ip: string | null,
+    ): Promise<{ messageId: string; status: "queued" | "failed" }> {
       const now = clock();
       const messageId = await db.transaction(async (tx) => {
         // 1. The caller's own draft, locked: a second click waits here and then finds it already sent.
@@ -418,6 +457,7 @@ export function createOutreachService(deps: {
         await queue.send(JOBS.mailSend, { messageId });
       } catch {
         await emailsRepo(db).update(scope, messageId, { status: "failed", error: "Could not be queued. Press Retry." });
+        return { messageId, status: "failed" };
       }
       return { messageId, status: "queued" };
     },
@@ -510,13 +550,27 @@ export function createOutreachService(deps: {
         if (mailbox === undefined || mailbox.needsReconnect) {
           throw conflict("reconnect_mailbox", "Reconnect your mailbox (sign out and sign in again), then retry.");
         }
-        if ((await suppressionListRepo(tx).reason(scope, message.toEmail)) !== null) {
-          throw unprocessable("suppressed", "This address is on the suppression list.");
+        const blockers = await messageBlockers(tx, message, config);
+        if (blockers.length > 0) {
+          throw unprocessable("checks_failed", `This email can't be sent: ${blockers.join("; ")}.`, {
+            checks: blockers.map((label) => ({ label })),
+          });
         }
-        await emailsRepo(tx).update(scope, id, { status: "queued", error: null });
+        // A retry counts against the daily cap like a new send.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`send:${scope.userId}`}))`);
+        const user = await rep(tx, scope);
+        if ((await emailsRepo(tx).sendsSince(scope, new Date(clock().getTime() - DAY_MS))) >= user.dailySendCap) {
+          throw tooManySends(user.dailySendCap);
+        }
+        await emailsRepo(tx).update(scope, id, { status: "queued", error: null, sentAt: null });
         await auditRepo(tx).write(scope, { action: "email.retry", entityType: "email_message", entityId: id, ip });
       });
-      await queue.send(JOBS.mailSend, { messageId: id });
+      try {
+        await queue.send(JOBS.mailSend, { messageId: id });
+      } catch {
+        await emailsRepo(db).update(scope, id, { status: "failed", error: "Could not be queued. Press Retry." });
+        throw new HttpError(503, "queue_unavailable", "The email couldn't be queued. Try again in a minute.");
+      }
     },
 
     // ───────── suppressions ─────────
@@ -541,7 +595,7 @@ export function createOutreachService(deps: {
         await auditRepo(tx).write(scope, {
           action: "suppression.add",
           entityType: "suppression",
-          meta: { reason: "manual" },
+          meta: { reason: "manual", email: input.email.toLowerCase() },
           ip,
         });
       });
@@ -553,7 +607,7 @@ export function createOutreachService(deps: {
         await auditRepo(tx).write(scope, {
           action: "suppression.remove",
           entityType: "suppression",
-          meta: {},
+          meta: { email: email.toLowerCase() },
           ip,
         });
       });
@@ -579,8 +633,13 @@ export function createUnsubscribeService(deps: { db: Database; secret: string })
 
 /** Suppresses the address company-wide and marks every contact with it unsubscribed, with timeline and audit rows. */
 export async function unsubscribeAddress(db: Database, email: string, reasonText: string): Promise<void> {
+  await db.transaction((tx) => unsubscribeAddressIn(tx, email, reasonText));
+}
+
+/** The same, inside the caller's transaction. */
+export async function unsubscribeAddressIn(tx: Executor, email: string, reasonText: string): Promise<void> {
   const scope = systemScope("unsubscribe");
-  await db.transaction(async (tx) => {
+  {
     const added = await suppressionListRepo(tx).add(scope, { email, reason: "unsubscribe", createdBy: null });
     const contacts = await contactEmailRepo(tx).markByEmail(scope, email, "unsubscribed");
     if (!added) return;
@@ -595,7 +654,45 @@ export async function unsubscribeAddress(db: Database, email: string, reasonText
     await auditRepo(tx).write(scope, {
       action: "suppression.add",
       entityType: "suppression",
-      meta: { reason: "unsubscribe" },
+      meta: { reason: "unsubscribe", email: email.toLowerCase() },
     });
+  }
+}
+
+/** What stops an already-written message going out now (Retry and the mail.send job re-check, §8.2 and rule 7):
+    the recipient checks and the named-client check on its stored subject and body. Empty when it may go. */
+export async function messageBlockers(
+  tx: Executor,
+  message: Pick<EmailRow, "contactId" | "accountId" | "toEmail" | "subject" | "bodyText">,
+  config: Pick<Env, "MAIL_ALLOWLIST">,
+): Promise<string[]> {
+  const scope = systemScope("send check");
+  if (message.contactId === null) return ["The contact was removed."];
+  const contact = await contactEmailRepo(tx).get(scope, message.contactId);
+  if (contact === undefined) return ["The contact was removed."];
+  if (contact.email?.toLowerCase() !== message.toEmail.toLowerCase()) return ["The contact's email address changed."];
+  const account = await accountsRepo(tx).get(scope, message.accountId);
+  const suppression = await suppressionListRepo(tx).reason(scope, message.toEmail);
+  const references = await referencesRepo(tx).allForChecks(scope);
+  const results = runChecks({
+    channel: "email",
+    subject: message.subject,
+    body: message.bodyText,
+    isReply: false,
+    contact: {
+      email: contact.email,
+      emailStatus: contact.emailStatus,
+      phone: null,
+      phoneType: "unknown",
+      doNotCall: false,
+    },
+    account: { doNotContact: account === undefined || account.account.doNotContact },
+    suppressionReason: suppression,
+    companyPostalAddress: "checked when written",
+    references,
+    allowlist: mailAllowlist(config),
   });
+  return blockingFailures(results)
+    .filter((check) => check.id === "recipient_ok" || check.id === "no_named_client")
+    .map((check) => check.label);
 }

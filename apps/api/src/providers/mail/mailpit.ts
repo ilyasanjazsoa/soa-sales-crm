@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import nodemailer from "nodemailer";
 import { z } from "zod";
 import { createFakeTokenRefresher } from "../identity/refresh";
-import { looksLikeBounce, MailPermanentError, type InboundMail, type MailProvider } from "./types";
+import { looksLikeBounce, MailPermanentError, MailRetryableError, type InboundMail, type MailProvider } from "./types";
 
 /* FAKE_PROVIDERS mail: delivers over SMTP to Mailpit (docker compose) and reads replies back through Mailpit's API.
    Nothing leaves the machine. A reply is simulated by sending a message to the rep that has In-Reply-To set. */
@@ -57,7 +57,8 @@ export function createMailpitMailProvider(options: { smtpUrl?: string; apiUrl?: 
         const code = (error as { responseCode?: unknown }).responseCode;
         if (typeof code === "number" && code >= 500)
           throw new MailPermanentError("The mail server rejected the message");
-        throw error;
+        // A temporary refusal (4xx) or no connection: SMTP accepted nothing, so a retry can't send twice.
+        throw new MailRetryableError("The mail server could not be reached");
       }
       return { providerMessageId: messageId, providerThreadId: messageId };
     },

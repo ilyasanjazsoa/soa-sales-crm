@@ -92,25 +92,39 @@ function Editor(props: { draft: Draft; accountId: string; sends: { used: number;
   const first = draft.contact.name.split(" ")[0] ?? draft.contact.name;
 
   // Saves (and re-checks) shortly after typing stops.
+  // Saves run one after another; only the answer to the newest one is kept, so an older, slower reply can't
+  // overwrite newer text or leave the editor stuck on "Saving…".
+  const sequence = useRef(0);
   const save = useMutation({
-    mutationFn: (patch: { subject?: string | null; body?: string }) =>
-      api(`/api/drafts/${draft.id}`, Draft, { method: "PATCH", body: patch }),
+    mutationFn: async (patch: { subject?: string | null; body?: string }) => {
+      sequence.current += 1;
+      const mine = sequence.current;
+      const next = await api(`/api/drafts/${draft.id}`, Draft, { method: "PATCH", body: patch });
+      return { next, mine };
+    },
+    onSuccess: ({ next, mine }) => {
+      if (mine === sequence.current) setSaved(next);
+    },
+  });
+  const timer = useRef<number | undefined>(undefined);
+  const saveNow = () => {
+    save.mutate({ ...(draft.channel === "email" ? { subject } : {}), body });
+  };
+  useEffect(() => {
+    if (subject === (saved.subject ?? "") && body === saved.body) return;
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(saveNow, 600);
+    return () => {
+      window.clearTimeout(timer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the text changes
+  }, [subject, body]);
+  const checkWording = useMutation({
+    mutationFn: () => api(`/api/drafts/${draft.id}/claims`, Draft, { method: "POST" }),
     onSuccess: (next) => {
       setSaved(next);
     },
   });
-  const timer = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    if (subject === (saved.subject ?? "") && body === saved.body) return;
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      save.mutate({ ...(draft.channel === "email" ? { subject } : {}), body });
-    }, 600);
-    return () => {
-      window.clearTimeout(timer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- save is stable enough; only the text matters
-  }, [subject, body]);
 
   const refresh = async () => {
     await Promise.all([
@@ -223,7 +237,22 @@ function Editor(props: { draft: Draft; accountId: string; sends: { used: number;
       </div>
       <div className="space-y-3 lg:col-span-2">
         <p className="text-xs font-semibold text-zinc-300">Compliance check</p>
-        {save.isError ? <ErrorState error={save.error} /> : <Checks checks={saved.checks} />}
+        {save.isError ? <ErrorState error={save.error} onRetry={saveNow} /> : <Checks checks={saved.checks} />}
+        {!saved.checks.some((check) => check.id === "claims") && (
+          <Btn
+            small
+            kind="ghost"
+            icon={Sparkles}
+            busy={checkWording.isPending}
+            disabled={pending}
+            onClick={() => {
+              checkWording.mutate();
+            }}
+          >
+            Check wording for guarantees
+          </Btn>
+        )}
+        {checkWording.isError && <ErrorState error={checkWording.error} />}
         {draft.channel === "email" ? (
           <div className="space-y-2">
             <Btn
@@ -431,10 +460,14 @@ export function OutreachTab({ account }: { account: Account }) {
     queryKey: ["drafts", account.id],
     queryFn: () => api(`/api/accounts/${account.id}/drafts`, DraftList),
   });
+  const [selected, setSelected] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: (useAi: boolean) =>
       api(`/api/accounts/${account.id}/drafts`, Draft, { method: "POST", body: { contactId, channel, tone, useAi } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["drafts", account.id] }),
+    onSuccess: async (draft) => {
+      setSelected(draft.id);
+      await queryClient.invalidateQueries({ queryKey: ["drafts", account.id] });
+    },
   });
   const contact = contacts.find((c) => c.id === contactId);
 
@@ -444,7 +477,7 @@ export function OutreachTab({ account }: { account: Account }) {
   if (!account.canEdit) {
     return <Empty>Claim this account to reach out.</Empty>;
   }
-  const current = drafts.data?.items[0];
+  const current = drafts.data?.items.find((item) => item.id === selected) ?? drafts.data?.items[0];
 
   return (
     <div className="space-y-4">
@@ -543,10 +576,24 @@ export function OutreachTab({ account }: { account: Account }) {
         ) : current === undefined ? null : (
           <>
             {drafts.data.items.length > 1 && (
-              <p className="mt-3 text-xs text-zinc-500">
-                {drafts.data.items.length - 1} older unsent draft{drafts.data.items.length === 2 ? "" : "s"} below this
-                one are kept until you send or discard them.
-              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                <span>Unsent drafts:</span>
+                {drafts.data.items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-pressed={item.id === current.id}
+                    className={`rounded-full border px-2 py-0.5 ${
+                      item.id === current.id ? "border-blue-700 text-blue-300" : "border-zinc-700 hover:text-zinc-200"
+                    }`}
+                    onClick={() => {
+                      setSelected(item.id);
+                    }}
+                  >
+                    {CHANNELS.find((entry) => entry.id === item.channel)?.label} to {item.contact.name}
+                  </button>
+                ))}
+              </div>
             )}
             <p className="mt-3 text-xs text-zinc-400">
               {CHANNELS.find((entry) => entry.id === current.channel)?.label} to {current.contact.name}

@@ -28,7 +28,7 @@ export function createGoogleMapsProvider(options: { apiKey: string; fetch?: type
     url.searchParams.set("key", options.apiKey);
     const response = await http(url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error(`Google Maps error ${String(response.status)}`);
-    return (await response.json()) as unknown;
+    return await response.json();
   };
   return {
     async geocode(address) {
