@@ -1,0 +1,106 @@
+{
+  "name": "named-permission-denied",
+  "input": {
+    "data": {
+      "today": "2026-11-24",
+      "account": {
+        "name": "Juniper Residences",
+        "propertyType": "Multifamily",
+        "city": "Irving",
+        "state": "TX",
+        "ownerCompany": "Example Holdings",
+        "sizeText": null,
+        "yearBuilt": null,
+        "occupancyPct": null,
+        "currentProvider": "None",
+        "contractTiming": null,
+        "contractEndDate": null,
+        "website": null
+      },
+      "contacts": [],
+      "signals": [
+        {
+          "text": "Break-ins in the garage",
+          "kind": "incident",
+          "confirmed": true,
+          "observedOn": null,
+          "sourceId": null
+        }
+      ],
+      "clientReference": {
+        "labelNamed": "Lone Star Freight Terminal",
+        "labelAnonymized": "a freight terminal we protect in Irving",
+        "namedPermission": false,
+        "stats": {
+          "avgResponseMin": 4
+        }
+      },
+      "pricing": null,
+      "defaultPackage": {
+        "posts": 2,
+        "armed": false,
+        "coverage": "24_7",
+        "supervisor": false,
+        "addons": ["patrol"],
+        "termMonths": 36
+      }
+    },
+    "sources": []
+  },
+  "recorded": {
+    "sections": [
+      {
+        "key": "overview",
+        "text": "Juniper Residences is a multifamily property in Irving.",
+        "sourceIds": []
+      },
+      {
+        "key": "decision_makers",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "security_signals",
+        "text": "- Break-ins in the garage.",
+        "sourceIds": []
+      },
+      {
+        "key": "current_coverage_and_timing",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "recommended_package",
+        "text": "Night coverage with patrols fits the garage problem.",
+        "sourceIds": []
+      },
+      {
+        "key": "proof_point_internal",
+        "text": "Lone Star Freight Terminal shows a 4 minute average response.",
+        "sourceIds": []
+      },
+      {
+        "key": "talking_points",
+        "text": "- Mention a freight terminal we protect in Irving with fast response.",
+        "sourceIds": []
+      },
+      {
+        "key": "likely_objections",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      }
+    ],
+    "recommendedPackage": {
+      "posts": 1,
+      "armed": false,
+      "coverage": "nights",
+      "supervisor": false,
+      "addons": ["patrol"],
+      "termMonths": 12
+    }
+  },
+  "expect": {
+    "citesOnly": [],
+    "mustNotContainOutsideInternal": ["Lone Star Freight Terminal"]
+  }
+}

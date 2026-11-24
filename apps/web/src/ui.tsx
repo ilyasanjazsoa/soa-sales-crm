@@ -59,7 +59,7 @@ export function Btn(
       type="button"
       {...rest}
       disabled={disabled === true || busy}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
+      className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
         small ? "px-2.5 py-1 text-xs" : "px-3 py-2 text-sm"
       } ${BUTTON_KINDS[kind]} ${className}`}
     >

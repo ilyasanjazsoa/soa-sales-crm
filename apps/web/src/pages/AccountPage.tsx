@@ -33,16 +33,11 @@ import { z } from "zod";
 import { api, ApiError } from "../api";
 import { choosableStages, LoseDialog, needsOverrideReason, OverrideDialog, StagePill } from "../deal-ui";
 import { useMe } from "../session";
+import { ResearchTab } from "./Research";
 import { Btn, Empty, ErrorState, Field, inputClass, Loading, Modal, Panel, Pill } from "../ui";
 
 const TABS: { id: string; label: string; icon: LucideIcon; milestone?: number; what?: string }[] = [
-  {
-    id: "research",
-    label: "Research",
-    icon: Sparkles,
-    milestone: 3,
-    what: "Sources, signals and the AI research brief with citations.",
-  },
+  { id: "research", label: "Research", icon: Sparkles },
   {
     id: "outreach",
     label: "Outreach",
@@ -419,7 +414,7 @@ function OwnerSelect({ account }: { account: Account }) {
 export function AccountPage() {
   const { id = "" } = useParams();
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") ?? "timeline";
+  const tab = params.get("tab") ?? "research";
   const me = useMe();
   const role = me.data?.user.role ?? "ae";
   const queryClient = useQueryClient();
@@ -604,6 +599,8 @@ export function AccountPage() {
           </div>
           {current?.id === "timeline" ? (
             <Timeline accountId={a.id} canEdit={a.canEdit} />
+          ) : current?.id === "research" ? (
+            <ResearchTab account={a} />
           ) : (
             <Panel title={current?.label ?? ""} icon={current?.icon}>
               <p className="text-sm text-zinc-300">{current?.what}</p>

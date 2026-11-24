@@ -1,0 +1,120 @@
+{
+  "name": "full-data",
+  "input": {
+    "data": {
+      "today": "2026-11-24",
+      "account": {
+        "name": "Redbud Logistics Park",
+        "propertyType": "Industrial",
+        "city": "Irving",
+        "state": "TX",
+        "ownerCompany": "Example Holdings",
+        "sizeText": null,
+        "yearBuilt": null,
+        "occupancyPct": null,
+        "currentProvider": "Cameras only",
+        "contractTiming": null,
+        "contractEndDate": null,
+        "website": null
+      },
+      "contacts": [
+        {
+          "name": "Dana Ortiz",
+          "title": "Property Manager",
+          "contactPref": null
+        }
+      ],
+      "signals": [
+        {
+          "text": "Two cargo thefts in March",
+          "kind": "incident",
+          "confirmed": true,
+          "observedOn": null,
+          "sourceId": "s1"
+        }
+      ],
+      "clientReference": {
+        "labelNamed": "Lone Star Freight Terminal",
+        "labelAnonymized": "a freight terminal we protect in Irving",
+        "namedPermission": false,
+        "stats": {
+          "avgResponseMin": 4
+        }
+      },
+      "pricing": null,
+      "defaultPackage": {
+        "posts": 2,
+        "armed": false,
+        "coverage": "24_7",
+        "supervisor": false,
+        "addons": ["patrol"],
+        "termMonths": 36
+      }
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "kind": "rep_note",
+        "title": "Site visit",
+        "url": null,
+        "text": "Two cargo thefts happened in the yard in March. Only cameras watch the gate."
+      }
+    ]
+  },
+  "recorded": {
+    "sections": [
+      {
+        "key": "overview",
+        "text": "Redbud Logistics Park is an industrial park in Irving with camera-only coverage.",
+        "sourceIds": ["s1"]
+      },
+      {
+        "key": "decision_makers",
+        "text": "- Dana Ortiz, Property Manager",
+        "sourceIds": []
+      },
+      {
+        "key": "security_signals",
+        "text": "- Two cargo thefts in the yard in March.",
+        "sourceIds": ["s1"]
+      },
+      {
+        "key": "current_coverage_and_timing",
+        "text": "Cameras only watch the gate today.",
+        "sourceIds": ["s1"]
+      },
+      {
+        "key": "recommended_package",
+        "text": "Two unarmed posts around the clock with patrols cover the yard and gate.",
+        "sourceIds": []
+      },
+      {
+        "key": "proof_point_internal",
+        "text": "Lone Star Freight Terminal: 4 minute average response.",
+        "sourceIds": []
+      },
+      {
+        "key": "talking_points",
+        "text": "- Ask how the March thefts were handled.\n- Mention a freight terminal we protect in Irving.",
+        "sourceIds": ["s1"]
+      },
+      {
+        "key": "likely_objections",
+        "text": "- They may think cameras are enough.",
+        "sourceIds": []
+      }
+    ],
+    "recommendedPackage": {
+      "posts": 2,
+      "armed": false,
+      "coverage": "24_7",
+      "supervisor": false,
+      "addons": ["patrol"],
+      "termMonths": 36
+    }
+  },
+  "expect": {
+    "citesOnly": ["s1"],
+    "mustNotContainOutsideInternal": ["Lone Star Freight Terminal"]
+  }
+}

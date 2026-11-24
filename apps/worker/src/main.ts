@@ -1,4 +1,16 @@
-import { createPgBossQueue, createS3ObjectStore, JOBS, runImport, systemClock } from "@soa/api/jobs";
+import {
+  createAiClient,
+  createBedrockAdapter,
+  createFakeAiAdapter,
+  createPgBossQueue,
+  createS3ObjectStore,
+  createWebFetcher,
+  JOBS,
+  runImport,
+  runResearchBrief,
+  runResearchFetch,
+  systemClock,
+} from "@soa/api/jobs";
 import { APP_ROLE, createDb } from "@soa/db";
 import { EnvError, parseEnv, type Env } from "@soa/shared";
 import { pino } from "pino";
@@ -47,6 +59,32 @@ await queue.boss.work<{ importId: string }>(JOBS.importRun, async (jobs) => {
     }
   }
 });
+const ai = createAiClient({
+  db: database.db,
+  adapter: config.FAKE_PROVIDERS ? createFakeAiAdapter() : createBedrockAdapter({ region: config.AWS_REGION }),
+  config,
+  clock: systemClock,
+});
+const fetcher = createWebFetcher();
+
+const handle = (name: string, run: (data: { accountId: string; userId: string }) => Promise<void>) =>
+  queue.boss.work<{ accountId: string; userId: string }>(name, async (jobs) => {
+    for (const job of jobs) {
+      log.info({ job: name, id: job.id }, "job started");
+      try {
+        await run(job.data);
+        log.info({ job: name, id: job.id }, "job done");
+      } catch (error) {
+        log.error({ job: name, id: job.id, err: failure(error) }, "job failed");
+        throw error;
+      }
+    }
+  });
+
+await handle(JOBS.researchFetch, (data) =>
+  runResearchFetch({ db: database.db, ai, fetcher, clock: systemClock }, data),
+);
+await handle(JOBS.researchBrief, (data) => runResearchBrief({ db: database.db, ai, clock: systemClock }, data));
 log.info({ jobs: Object.values(JOBS) }, "worker started");
 
 const shutdown = (signal: string) => {

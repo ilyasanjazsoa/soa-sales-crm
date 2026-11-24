@@ -6,19 +6,9 @@ import tseslint from "typescript-eslint";
 
 /* CLAUDE.md rule 3: AI is called only through apps/api/src/providers/ai/client.ts.
    The Bedrock SDK is imported only there; worker jobs call the same client. */
-const otherAiSdks = [
-  "@anthropic-ai/*",
-  "openai",
-  "@google/generative-ai",
-  "@google/genai",
-  "ai",
-  "@ai-sdk/*",
-  "langchain",
-  "@langchain/*",
-  "cohere-ai",
-  "@mistralai/*",
-  "ollama",
-];
+// Exact package names (a bare "ai" pattern would also match our own providers/ai folder).
+const otherAiPackages = ["openai", "ai", "langchain", "cohere-ai", "ollama", "@google/generative-ai", "@google/genai"];
+const otherAiScopes = ["@anthropic-ai/*", "@ai-sdk/*", "@langchain/*", "@mistralai/*"];
 const bedrockSdk = ["@aws-sdk/client-bedrock*"];
 const aiMessage = "AI is called only through apps/api/src/providers/ai/client.ts (CLAUDE.md rule 3).";
 
@@ -47,14 +37,23 @@ export default tseslint.config(
       "@typescript-eslint/restrict-template-expressions": ["error", { allowNumber: true }],
       "no-restricted-imports": [
         "error",
-        { patterns: [{ group: [...otherAiSdks, ...bedrockSdk], message: aiMessage }] },
+        {
+          paths: otherAiPackages.map((name) => ({ name, message: aiMessage })),
+          patterns: [{ group: [...otherAiScopes, ...bedrockSdk], message: aiMessage }],
+        },
       ],
     },
   },
   {
     files: ["apps/api/src/providers/ai/**"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [{ group: otherAiSdks, message: aiMessage }] }],
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: otherAiPackages.map((name) => ({ name, message: aiMessage })),
+          patterns: [{ group: otherAiScopes, message: aiMessage }],
+        },
+      ],
     },
   },
   {

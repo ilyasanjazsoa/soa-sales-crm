@@ -1,0 +1,99 @@
+{
+  "name": "sparse-data",
+  "input": {
+    "data": {
+      "today": "2026-11-24",
+      "account": {
+        "name": "Oakcrest Plaza",
+        "propertyType": "Class A office",
+        "city": "Irving",
+        "state": "TX",
+        "ownerCompany": "Example Holdings",
+        "sizeText": null,
+        "yearBuilt": null,
+        "occupancyPct": null,
+        "currentProvider": null,
+        "contractTiming": null,
+        "contractEndDate": null,
+        "website": null
+      },
+      "contacts": [],
+      "signals": [],
+      "clientReference": null,
+      "pricing": null,
+      "defaultPackage": {
+        "posts": 2,
+        "armed": false,
+        "coverage": "24_7",
+        "supervisor": false,
+        "addons": ["patrol"],
+        "termMonths": 36
+      }
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "kind": "rep_note",
+        "title": "Note",
+        "url": null,
+        "text": "The lobby is busy at lunch."
+      }
+    ]
+  },
+  "recorded": {
+    "sections": [
+      {
+        "key": "overview",
+        "text": "Oakcrest Plaza is a Class A office property in Irving.",
+        "sourceIds": ["s1"]
+      },
+      {
+        "key": "decision_makers",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "security_signals",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "current_coverage_and_timing",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "recommended_package",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "proof_point_internal",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "talking_points",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "likely_objections",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      }
+    ],
+    "recommendedPackage": {
+      "posts": 2,
+      "armed": false,
+      "coverage": "24_7",
+      "supervisor": true,
+      "addons": ["portal"],
+      "termMonths": 36
+    }
+  },
+  "expect": {
+    "citesOnly": ["s1"],
+    "notEnoughInformationIn": ["decision_makers", "security_signals"]
+  }
+}

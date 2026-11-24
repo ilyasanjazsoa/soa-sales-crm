@@ -1,0 +1,35 @@
+{
+  "name": "theft-and-contract",
+  "input": {
+    "source": {
+      "id": "src-1",
+      "kind": "website",
+      "title": "Lakeshore Distribution - News",
+      "url": "https://example.example/",
+      "text": "Lakeshore Distribution Park welcomes three new tenants this spring. Two trailer thefts were reported in the west yard in February. The current guard contract ends on June 30."
+    }
+  },
+  "recorded": {
+    "signals": [
+      {
+        "text": "Two trailer thefts in the west yard in February",
+        "kind": "incident",
+        "quote": "Two trailer thefts were reported in the west yard in February."
+      },
+      {
+        "text": "Guard contract ends June 30",
+        "kind": "timing",
+        "quote": "The current guard contract ends on June 30."
+      },
+      {
+        "text": "Three new tenants this spring",
+        "kind": "tenant",
+        "quote": "Lakeshore Distribution Park welcomes three new tenants this spring."
+      }
+    ]
+  },
+  "expect": {
+    "minSignals": 2,
+    "kinds": ["incident", "timing"]
+  }
+}

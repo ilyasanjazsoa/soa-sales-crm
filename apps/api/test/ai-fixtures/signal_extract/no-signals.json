@@ -1,0 +1,19 @@
+{
+  "name": "no-signals",
+  "input": {
+    "source": {
+      "id": "src-1",
+      "kind": "website",
+      "title": "Amenities",
+      "url": "https://example.example/",
+      "text": "Our Class A tower offers a fitness center, a rooftop terrace and covered parking for 900 cars."
+    }
+  },
+  "recorded": {
+    "signals": []
+  },
+  "expect": {
+    "minSignals": 0,
+    "maxSignals": 0
+  }
+}

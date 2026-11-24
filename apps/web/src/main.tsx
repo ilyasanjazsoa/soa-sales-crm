@@ -6,6 +6,7 @@ import { ApiError } from "./api";
 import { Layout } from "./Layout";
 import { AdminPage } from "./pages/Admin";
 import { AccountPage } from "./pages/AccountPage";
+import { AdminReferencesPage } from "./pages/AdminReferences";
 import { AdminUsersPage } from "./pages/AdminUsers";
 import { ComingPage } from "./pages/Coming";
 import { LoginPage } from "./pages/Login";
@@ -78,16 +79,7 @@ const router = createBrowserRouter([
               <ComingPage title="Pricing" milestone={6} what="Rates, add-ons and term discounts, with versions." />
             ),
           },
-          {
-            path: "references",
-            element: (
-              <ComingPage
-                title="Client references"
-                milestone={3}
-                what="Proof points for outreach, named only with the client's permission."
-              />
-            ),
-          },
+          { path: "references", element: <AdminReferencesPage /> },
           {
             path: "suppressions",
             element: (

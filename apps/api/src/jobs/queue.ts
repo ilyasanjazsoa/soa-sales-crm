@@ -4,11 +4,15 @@ import PgBoss from "pg-boss";
 
 export const JOBS = {
   importRun: "import.run",
+  researchFetch: "research.fetch",
+  researchBrief: "research.brief",
 } as const;
 export type JobName = (typeof JOBS)[keyof typeof JOBS];
 
 export interface JobPayloads {
   "import.run": { importId: string };
+  "research.fetch": { accountId: string; userId: string };
+  "research.brief": { accountId: string; userId: string };
 }
 
 export interface JobQueue {
@@ -19,6 +23,8 @@ export interface JobQueue {
 /** Retries per job (§14): import.run is resumable by row and is not retried automatically. */
 export const JOB_OPTIONS: Record<JobName, { retryLimit: number }> = {
   "import.run": { retryLimit: 0 },
+  "research.fetch": { retryLimit: 2 },
+  "research.brief": { retryLimit: 1 },
 };
 
 export async function createPgBossQueue(databaseUrl: string): Promise<JobQueue & { boss: PgBoss }> {
