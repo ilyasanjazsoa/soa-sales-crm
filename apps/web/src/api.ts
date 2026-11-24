@@ -59,3 +59,6 @@ export async function api<T>(
   }
   return schema.parse(payload);
 }
+
+/** The CSRF header for requests made without api() (file uploads). */
+export const csrfHeader = (): Record<string, string> => ({ "x-csrf-token": csrfToken ?? readCookie("csrf") ?? "" });

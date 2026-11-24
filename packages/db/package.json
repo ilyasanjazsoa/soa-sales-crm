@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./index.ts",
-    "./testing": "./testing.ts"
+    "./testing": "./testing.ts",
+    "./seed": "./seed.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
@@ -15,7 +16,8 @@
   },
   "dependencies": {
     "drizzle-orm": "^0.44.5",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "@soa/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/pg": "^8.15.5",

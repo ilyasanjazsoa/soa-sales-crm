@@ -5,9 +5,12 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { ApiError } from "./api";
 import { Layout } from "./Layout";
 import { AdminPage } from "./pages/Admin";
+import { AccountPage } from "./pages/AccountPage";
 import { AdminUsersPage } from "./pages/AdminUsers";
 import { ComingPage } from "./pages/Coming";
 import { LoginPage } from "./pages/Login";
+import { PipelinePage } from "./pages/Pipeline";
+import { ProspectsPage } from "./pages/Prospects";
 import { SettingsPage } from "./pages/Settings";
 import { useMe } from "./session";
 import "./index.css";
@@ -43,26 +46,9 @@ const router = createBrowserRouter([
           />
         ),
       },
-      {
-        path: "prospects",
-        element: (
-          <ComingPage
-            title="Prospect finder"
-            milestone={2}
-            what="Search, filter and claim accounts, with fit scores and CSV import."
-          />
-        ),
-      },
-      {
-        path: "pipeline",
-        element: (
-          <ComingPage
-            title="Pipeline"
-            milestone={2}
-            what="Your deals by stage, as a board or a list, with the weighted forecast."
-          />
-        ),
-      },
+      { path: "prospects", element: <ProspectsPage /> },
+      { path: "accounts/:id", element: <AccountPage /> },
+      { path: "pipeline", element: <PipelinePage /> },
       {
         path: "calendar",
         element: (
@@ -112,10 +98,7 @@ const router = createBrowserRouter([
               />
             ),
           },
-          {
-            path: "imports",
-            element: <ComingPage title="Imports" milestone={2} what="CSV imports and their skipped rows." />,
-          },
+
           {
             path: "audit",
             element: (

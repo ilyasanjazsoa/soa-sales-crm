@@ -96,6 +96,10 @@ export function createUsersService({ db, config }: { db: Database; config: Env }
       });
     },
 
+    async assignable(scope: UserScope) {
+      return usersRepo(db).listAssignable(scope);
+    },
+
     async list(scope: UserScope): Promise<AdminUser[]> {
       return (await usersRepo(db).listWithAccountCounts(scope)).map(toAdminUser);
     },

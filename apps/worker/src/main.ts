@@ -1,8 +1,9 @@
+import { createPgBossQueue, createS3ObjectStore, JOBS, runImport, systemClock } from "@soa/api/jobs";
+import { APP_ROLE, createDb } from "@soa/db";
 import { EnvError, parseEnv, type Env } from "@soa/shared";
-import PgBoss from "pg-boss";
 import { pino } from "pino";
 
-/* Background jobs run on pg-boss inside Postgres (ARCHITECTURE.md §14). Job handlers arrive with their milestones. */
+/* Background jobs run on pg-boss inside Postgres (ARCHITECTURE.md §14). */
 
 function loadConfig(): Env {
   try {
@@ -18,22 +19,42 @@ function loadConfig(): Env {
 
 const config = loadConfig();
 const log = pino({ name: "worker", level: config.LOG_LEVEL ?? "info" });
-const boss = new PgBoss({ connectionString: config.DATABASE_URL });
+const database = createDb(config.DATABASE_URL, { role: APP_ROLE });
+const store = createS3ObjectStore(config);
+const queue = await createPgBossQueue(config.DATABASE_URL);
 
 // Log what failed, never the message: errors can carry job data (CLAUDE.md rule 8).
-boss.on("error", (error: Error & { code?: unknown }) => {
-  log.error(
-    { err: { name: error.name, code: typeof error.code === "string" ? error.code : undefined } },
-    "pg-boss error",
-  );
+const failure = (error: unknown) => {
+  const code = error instanceof Error ? (error as unknown as { code?: unknown }).code : undefined;
+  return {
+    name: error instanceof Error ? error.name : typeof error,
+    code: typeof code === "string" ? code : undefined,
+  };
+};
+queue.boss.on("error", (error: Error) => {
+  log.error({ err: failure(error) }, "pg-boss error");
 });
 
-await boss.start();
-log.info("worker started; no jobs registered yet");
+await queue.boss.work<{ importId: string }>(JOBS.importRun, async (jobs) => {
+  for (const job of jobs) {
+    log.info({ job: JOBS.importRun, id: job.id }, "job started");
+    try {
+      await runImport({ db: database.db, store, clock: systemClock }, job.data.importId);
+      log.info({ job: JOBS.importRun, id: job.id }, "job done");
+    } catch (error) {
+      log.error({ job: JOBS.importRun, id: job.id, err: failure(error) }, "job failed");
+      throw error;
+    }
+  }
+});
+log.info({ jobs: Object.values(JOBS) }, "worker started");
 
 const shutdown = (signal: string) => {
   log.info({ signal }, "shutting down");
-  void boss.stop({ graceful: true }).then(() => process.exit(0));
+  void queue
+    .stop()
+    .then(() => database.close())
+    .then(() => process.exit(0));
 };
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
