@@ -17,6 +17,12 @@ import { registerFakeIdpRoutes } from "./routes/fake-idp";
 import { registerHealthRoutes } from "./routes/health";
 import { registerUserRoutes } from "./routes/users";
 import { registerCrmRoutes } from "./routes/crm";
+import { registerResearchRoutes } from "./routes/research";
+import { createResearchService } from "./services/research";
+import { createAiClient } from "./providers/ai/client";
+import { createBedrockAdapter } from "./providers/ai/bedrock";
+import { createFakeAiAdapter } from "./providers/ai/fake";
+import type { AiAdapter } from "./providers/ai/types";
 import { createPgBossQueue, type JobQueue } from "./jobs/queue";
 import { createS3ObjectStore, type ObjectStore } from "./providers/storage";
 import { createAccountsService } from "./services/accounts";
@@ -42,6 +48,8 @@ export interface BuildAppOptions {
   ipRateLimitPerMinute?: number;
   /** File storage; defaults to S3 (MinIO locally). */
   store?: ObjectStore;
+  /** AI adapter; defaults to the fake when FAKE_PROVIDERS=true, else Bedrock. */
+  aiAdapter?: AiAdapter;
   /** Job queue; defaults to pg-boss in Postgres. */
   queue?: JobQueue;
   /** Refuse to start when the database login can bypass the app role (default: in production). */
@@ -134,6 +142,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       imports: createImportsService({ db, store, queue }),
       exports: createExportService({ db }),
     });
+
+    const ai = createAiClient({
+      db,
+      adapter:
+        options.aiAdapter ??
+        (config.FAKE_PROVIDERS ? createFakeAiAdapter() : createBedrockAdapter({ region: config.AWS_REGION })),
+      config,
+      clock,
+    });
+    registerResearchRoutes(app, { research: createResearchService({ db, queue, ai, clock }) });
 
     await app.ready();
   } catch (error) {

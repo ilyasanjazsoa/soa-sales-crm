@@ -49,8 +49,11 @@ test("import, search, claim, work an account, pipeline", async ({ page }, testIn
   await stage.selectOption("researched");
   await expect(stage).toHaveValue("researched");
 
-  await page.getByLabel("Add a note").fill("Walked the perimeter; gate 3 is unattended at night.");
-  await page.getByRole("button", { name: "Add", exact: true }).first().click();
+  await page.getByRole("tab", { name: "Timeline" }).click();
+  await expect(page.getByRole("heading", { name: "Timeline" })).toBeVisible();
+  const noteBox = page.getByLabel("Add a note");
+  await noteBox.fill("Walked the perimeter; gate 3 is unattended at night.");
+  await noteBox.press("Enter");
   await expect(page.getByText("gate 3 is unattended")).toBeVisible();
   await expect(page.getByText("Stage moved from Lead to Researched")).toBeVisible();
   await shot("3-account");

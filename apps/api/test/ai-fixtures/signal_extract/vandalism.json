@@ -1,0 +1,25 @@
+{
+  "name": "vandalism",
+  "input": {
+    "source": {
+      "id": "src-1",
+      "kind": "website",
+      "title": "Community update",
+      "url": "https://example.example/",
+      "text": "Residents reported graffiti and vandalism in the parking garage after midnight. Management is reviewing security options."
+    }
+  },
+  "recorded": {
+    "signals": [
+      {
+        "text": "Vandalism in the parking garage after midnight",
+        "kind": "incident",
+        "quote": "Residents reported graffiti and vandalism in the parking garage after midnight."
+      }
+    ]
+  },
+  "expect": {
+    "minSignals": 1,
+    "kinds": ["incident"]
+  }
+}

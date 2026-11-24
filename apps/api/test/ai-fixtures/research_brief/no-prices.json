@@ -1,0 +1,105 @@
+{
+  "name": "no-prices",
+  "input": {
+    "data": {
+      "today": "2026-11-24",
+      "account": {
+        "name": "Hillcrest Shopping Center",
+        "propertyType": "Retail",
+        "city": "Irving",
+        "state": "TX",
+        "ownerCompany": "Example Holdings",
+        "sizeText": null,
+        "yearBuilt": null,
+        "occupancyPct": null,
+        "currentProvider": "Regional guard company",
+        "contractTiming": null,
+        "contractEndDate": null,
+        "website": null
+      },
+      "contacts": [
+        {
+          "name": "Sam Patel",
+          "title": "General Manager",
+          "contactPref": "Prefers mornings"
+        }
+      ],
+      "signals": [],
+      "clientReference": null,
+      "pricing": null,
+      "defaultPackage": {
+        "posts": 2,
+        "armed": false,
+        "coverage": "24_7",
+        "supervisor": false,
+        "addons": ["patrol"],
+        "termMonths": 36
+      }
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "kind": "rep_note",
+        "title": "Call",
+        "url": null,
+        "text": "The manager said their guard company misses patrols on weekends."
+      }
+    ]
+  },
+  "recorded": {
+    "sections": [
+      {
+        "key": "overview",
+        "text": "Hillcrest Shopping Center is a retail center in Irving.",
+        "sourceIds": ["s1"]
+      },
+      {
+        "key": "decision_makers",
+        "text": "- Sam Patel, General Manager (prefers mornings)",
+        "sourceIds": []
+      },
+      {
+        "key": "security_signals",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "current_coverage_and_timing",
+        "text": "A regional guard company that misses weekend patrols, per the manager.",
+        "sourceIds": ["s1"]
+      },
+      {
+        "key": "recommended_package",
+        "text": "Business-hours coverage with patrols closes the weekend gap.",
+        "sourceIds": []
+      },
+      {
+        "key": "proof_point_internal",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "talking_points",
+        "text": "Not enough information in the sources yet.",
+        "sourceIds": []
+      },
+      {
+        "key": "likely_objections",
+        "text": "- Switching providers mid-contract.",
+        "sourceIds": []
+      }
+    ],
+    "recommendedPackage": {
+      "posts": 1,
+      "armed": false,
+      "coverage": "business_hours",
+      "supervisor": false,
+      "addons": ["patrol"],
+      "termMonths": 12
+    }
+  },
+  "expect": {
+    "citesOnly": ["s1"],
+    "noDollarAmounts": true
+  }
+}

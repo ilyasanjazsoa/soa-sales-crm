@@ -264,6 +264,47 @@ const ROUTES: Record<string, RouteCase> = {
     asOtherAe: expectNotFound,
   },
 
+  // ───────── research ─────────
+  "GET /api/accounts/:id/sources": {
+    access: "session",
+    path: (ctx) => `/api/accounts/${ctx.ae1AccountId}/sources`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/accounts/:id/sources": {
+    access: "session",
+    path: (ctx) => `/api/accounts/${ctx.ae1AccountId}/sources`,
+    body: () => ({ text: "Planted source text" }),
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/accounts/:id/research/fetch": {
+    access: "session",
+    path: (ctx) => `/api/accounts/${ctx.ae1AccountId}/research/fetch`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/accounts/:id/brief": {
+    access: "session",
+    path: (ctx) => `/api/accounts/${ctx.ae1AccountId}/brief`,
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/accounts/:id/brief": {
+    access: "session",
+    path: (ctx) => `/api/accounts/${ctx.ae1AccountId}/brief`,
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/admin/references": { access: "manager", path: () => "/api/admin/references", asOtherAe: expectForbidden },
+  "POST /api/admin/references": {
+    access: "manager",
+    path: () => "/api/admin/references",
+    body: () => ({ labelNamed: "X Corp", labelAnonymized: "a client in Dallas", propertyTypes: ["Industrial"] }),
+    asOtherAe: expectForbidden,
+  },
+  "PATCH /api/admin/references/:id": {
+    access: "manager",
+    path: (ctx) => `/api/admin/references/${ctx.ae1AccountId}`,
+    body: () => ({ namedPermission: true }),
+    asOtherAe: expectForbidden,
+  },
+
   // ───────── imports and export ─────────
   "POST /api/imports": { access: "session", path: () => "/api/imports", asOtherAe: expectNoLeak },
   "POST /api/imports/:id/preview": {

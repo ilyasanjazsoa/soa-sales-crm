@@ -1,0 +1,25 @@
+{
+  "name": "construction-growth",
+  "input": {
+    "source": {
+      "id": "src-1",
+      "kind": "website",
+      "title": "Projects",
+      "url": "https://example.example/",
+      "text": "Phase 2 construction of the second warehouse begins in April. The building will add 300,000 square feet."
+    }
+  },
+  "recorded": {
+    "signals": [
+      {
+        "text": "Phase 2 warehouse construction starts in April",
+        "kind": "growth",
+        "quote": "Phase 2 construction of the second warehouse begins in April."
+      }
+    ]
+  },
+  "expect": {
+    "minSignals": 1,
+    "kinds": ["growth"]
+  }
+}
