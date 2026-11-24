@@ -264,19 +264,25 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
     async claim(scope: UserScope, id: string, ip: string | null): Promise<Account> {
       await db.transaction(async (tx) => {
         const repo = accountsRepo(tx);
-        // Visible when the request started (snapshot read): otherwise this is someone else's account → 404.
-        const before = await repo.get(scope, id);
-        if (before === undefined) throw notFound();
         const claimed = await repo.claim(scope, id);
-        // It was in the pool when we looked, but another rep's claim committed first → 409.
-        if (claimed === undefined) throw conflict("already_owned", "Someone has already claimed this account.");
+        if (claimed === undefined) {
+          // A second claim returns 409 (acceptance), but only for an account that was in the shared pool, which
+          // every rep could already see. An account that was never in the pool stays a 404 (no existence oracle).
+          if (
+            (await repo.get(scope, id)) !== undefined ||
+            (await repo.wasClaimedFromPool(systemScope("claim check"), id))
+          ) {
+            throw conflict("already_owned", "Someone has already claimed this account.");
+          }
+          throw notFound();
+        }
         const reassigned = await dealsRepo(tx).reassignOpen(scope, id, scope.userId);
         if (reassigned.length === 0) await newLeadDeal(tx, scope, claimed, scope.userId);
         await activitiesRepo(tx).insert(scope, {
           accountId: id,
           type: "owner_change",
           subject: "Claimed this account",
-          meta: { to: scope.userId },
+          meta: { to: scope.userId, claimed: true },
         });
         await auditRepo(tx).write(scope, { action: "account.claim", entityType: "account", entityId: id, ip });
       });
