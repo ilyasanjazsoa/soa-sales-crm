@@ -20,7 +20,7 @@ import { registerCrmRoutes } from "./routes/crm";
 import { registerResearchRoutes } from "./routes/research";
 import { createResearchService } from "./services/research";
 import { registerOutreachRoutes, registerUnsubscribeRoutes } from "./routes/outreach";
-import { createOutreachService, createUnsubscribeService } from "./services/outreach";
+import { createOutreachService, createUnsubscribeService, mailAllowlist } from "./services/outreach";
 import { registerMeetingRoutes } from "./routes/meetings";
 import { registerTodayRoutes } from "./routes/today";
 import { registerWebApp } from "./routes/web-app";
@@ -210,6 +210,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       refresher: createTokenRefresher(config, clock),
       cipher: createTokenCipher(config.TOKEN_ENC_KEY),
       clock,
+      allowlist: mailAllowlist(config),
     });
     registerMeetingRoutes(app, { meetings });
     registerTodayRoutes(app, { today: createTodayService({ db, ai, meetings, clock }) });

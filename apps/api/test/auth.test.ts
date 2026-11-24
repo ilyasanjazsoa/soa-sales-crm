@@ -259,7 +259,8 @@ describe("security headers and rate limits", () => {
 
   it("limits /api requests per session", async () => {
     await createUser("dana@soa.example");
-    app = await testApp({ rateLimitPerMinute: 8 });
+    // A fixed clock: the one-minute window can't roll over between the requests.
+    app = await testApp({ rateLimitPerMinute: 8, clock: fakeClock().clock });
     const session = await signIn(app, "dana@soa.example");
     const statuses: number[] = [];
     for (let index = 0; index < 8; index += 1) {

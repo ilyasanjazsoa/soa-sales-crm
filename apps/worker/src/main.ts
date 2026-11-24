@@ -27,7 +27,7 @@ import {
   syncableUsers,
   systemClock,
 } from "@soa/api/jobs";
-import { APP_ROLE, createDb } from "@soa/db";
+import { APP_ROLE, appRoleProblems, createDb } from "@soa/db";
 import { EnvError, parseEnv, type Env } from "@soa/shared";
 import { pino } from "pino";
 
@@ -48,6 +48,15 @@ function loadConfig(): Env {
 const config = loadConfig();
 const log = pino({ name: "worker", level: config.LOG_LEVEL ?? "info" });
 const database = createDb(config.DATABASE_URL, { role: APP_ROLE });
+// Like the api: in production, refuse a database login that could bypass the app role (owner, superuser, or one
+// that can change audit_log).
+if (config.NODE_ENV === "production") {
+  const problems = await appRoleProblems(database.pool);
+  if (problems.length > 0) {
+    process.stderr.write(`worker: DATABASE_URL must log in as a member of ${APP_ROLE} only: ${problems.join("; ")}\n`);
+    process.exit(1);
+  }
+}
 const store = createS3ObjectStore(config);
 const queue = await createPgBossQueue(config.DATABASE_URL, { supervise: true });
 

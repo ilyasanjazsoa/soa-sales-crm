@@ -5,8 +5,11 @@ name: Deploy
 # a one-off task, then roll the api and worker to the new image. Migrations must be backward compatible with the
 # version still running.
 on:
-  push:
+  # Staging: after CI has passed on main.
+  workflow_run:
+    workflows: [CI]
     branches: [main]
+    types: [completed]
   workflow_dispatch:
     inputs:
       environment:
@@ -27,15 +30,21 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Only main is ever deployed: a manual run from another branch stops here (and the AWS role trusts main only).
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     environment: ${{ github.event.inputs.environment || 'staging' }}
     env:
       ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       CLUSTER: soa-crm-${{ github.event.inputs.environment || 'staging' }}
       REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-      TAG: ${{ github.sha }}
+      TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:

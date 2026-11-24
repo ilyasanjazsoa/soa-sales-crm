@@ -34,7 +34,7 @@ export function createS3ObjectStore(config: Pick<Env, "S3_BUCKET" | "S3_ENDPOINT
           Key: key,
           Body: body,
           ContentType: contentType,
-          ServerSideEncryption: local ? undefined : "AES256",
+          // No header in AWS: the bucket's default (KMS) encryption applies.
         }),
       );
     },

@@ -45,7 +45,7 @@ import { systemScope, userScope, type Scope, type UserScope } from "../repos/sco
 import { usersRepo } from "../repos/users";
 import { advanceDeal } from "./advance";
 import { isoDay } from "./mappers";
-import type { OutreachService } from "./outreach";
+import { mailAllowlist, type OutreachService } from "./outreach";
 
 /* Pricing, proposals and contracts (ARCHITECTURE.md §6, §10). Every price is computed here by the pricing engine;
    a proposal stores a snapshot, so a later pricing change never alters it. */
@@ -55,6 +55,7 @@ type ProposalConfig = Pick<
   | "PUBLIC_URL"
   | "IP_HASH_SALT"
   | "DEPLOY_ENV"
+  | "MAIL_ALLOWLIST"
   | "COMPANY_NAME"
   | "COMPANY_POSTAL_ADDRESS"
   | "COMPANY_SIGNER_NAME"
@@ -75,6 +76,7 @@ const SHARE_DAYS = 30;
 const RENDER_STALE_MS = 10 * 60 * 1000;
 /** Callbacks older than this are refused (Dropbox Sign retries for up to a few days). */
 const WEBHOOK_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+const VIEWED_MAX_AGE_MS = 60 * 60 * 1000;
 
 /** What a proposal stores: the engine's breakdown plus what is needed to show it later without the live config. */
 const Snapshot = z.object({
@@ -560,6 +562,12 @@ export function createProposalsService(deps: ProposalDeps) {
         if (contact.emailStatus !== "ok" || (await suppressionListRepo(tx).reason(scope, contact.email)) !== null) {
           throw unprocessable("suppressed", "This contact can't be emailed (suppressed, bounced or unsubscribed).");
         }
+        // The e-signature service emails the signer (even in test mode): the same rules as any email.
+        if (deal.account.doNotContact) throw unprocessable("do_not_contact", "This account is marked do not contact.");
+        const allowlist = mailAllowlist(config);
+        if (allowlist !== null && !allowlist.includes(contact.email.toLowerCase())) {
+          throw unprocessable("not_allowlisted", "Staging: this address is not on MAIL_ALLOWLIST.");
+        }
         const snapshot = Snapshot.parse(proposal.pricing);
         const pkg = Package.parse(proposal.package);
         const document = await renderAgreementPdf({
@@ -676,9 +684,13 @@ export function createProposalsService(deps: ProposalDeps) {
 
       // The callback's signature doesn't cover which envelope it names, so the provider's own record decides.
       let state: Awaited<ReturnType<ESignProvider["status"]>> = "unknown";
-      if (event.type !== "viewed" && event.type !== "other") state = await esign.status(event.envelopeId);
+      if (event.type !== "other") state = await esign.status(event.envelopeId);
       const confirmed =
-        event.type === "viewed" ||
+        // "viewed" can't be checked against the provider's record, so it must at least name a live envelope and be
+        // recent (the callback's signature doesn't cover which envelope it names).
+        (event.type === "viewed" &&
+          (state === "pending" || state === "complete") &&
+          now.getTime() - event.occurredAt.getTime() < VIEWED_MAX_AGE_MS) ||
         (event.type === "signed" && state === "complete") ||
         (event.type === "declined" && state === "declined") ||
         (event.type === "voided" && state === "canceled");

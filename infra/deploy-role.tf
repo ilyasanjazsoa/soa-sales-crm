@@ -20,8 +20,12 @@ resource "aws_iam_role" "deploy" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
-        # Only the matching GitHub environment (production needs a manual approval there).
-        StringLike = { "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:environment:${var.environment}" }
+        # Only the matching GitHub environment (production needs a manual approval there), and only the deploy
+        # workflow as it is on main: a workflow on another branch can't assume this role.
+        StringLike = {
+          "token.actions.githubusercontent.com:sub"              = "repo:${var.github_repository}:environment:${var.environment}"
+          "token.actions.githubusercontent.com:job_workflow_ref" = "${var.github_repository}/.github/workflows/deploy.yml@refs/heads/main"
+        }
       }
     }]
   })

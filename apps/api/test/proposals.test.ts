@@ -506,3 +506,82 @@ describe("review fixes", () => {
     expect(await ownerQuery("SELECT status FROM proposals")).toEqual([{ status: "accepted" }]);
   });
 });
+
+describe("security review fixes", () => {
+  const multipart = (json: string) => {
+    const boundary = "----soaBoundary";
+    return {
+      headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+      payload: `--${boundary}\r\nContent-Disposition: form-data; name="json"\r\n\r\n${json}\r\n--${boundary}--\r\n`,
+    };
+  };
+  const tryContract = async () => {
+    const proposal = await createProposal();
+    await sendProposal(proposal.id);
+    return app.inject({
+      method: "POST",
+      url: `/api/proposals/${proposal.id}/contract`,
+      ...as(),
+      payload: { signerContactId: contactId, startDate: "2026-12-01" },
+    });
+  };
+
+  it("refuses an e-signature request to a do-not-contact account", async () => {
+    const proposal = await createProposal();
+    await sendProposal(proposal.id);
+    await ownerQuery("UPDATE accounts SET do_not_contact = true");
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/proposals/${proposal.id}/contract`,
+      ...as(),
+      payload: { signerContactId: contactId, startDate: "2026-12-01" },
+    });
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toContain("do not contact");
+  });
+
+  it("staging (MAIL_ALLOWLIST) refuses a signer outside the list", async () => {
+    await app.close();
+    app = await testApp({
+      env: {
+        COMPANY_POSTAL_ADDRESS: "100 Example Plaza, Dallas, TX 75201",
+        COMPANY_SIGNER_NAME: "Jordan Hale",
+        COMPANY_SIGNER_EMAIL: "jordan.hale@soa.example",
+        MAIL_ALLOWLIST: "tester@soa.example,dana@harbor.example",
+      },
+      queue,
+      store,
+      esign: esign.provider,
+    });
+    session = await signIn(app, ae.email);
+    expect((await tryContract()).statusCode).toBe(201);
+    await ownerQuery("UPDATE contracts SET status = 'voided'");
+    await ownerQuery("UPDATE contacts SET email = 'someone@else.example'");
+    const proposal = await createProposal();
+    await ownerQuery("UPDATE proposals SET status = 'sent', expires_at = now() + interval '1 day' WHERE id = $1", [
+      proposal.id,
+    ]);
+    const refused = await app.inject({
+      method: "POST",
+      url: `/api/proposals/${proposal.id}/contract`,
+      ...as(),
+      payload: { signerContactId: contactId, startDate: "2026-12-01" },
+    });
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body).toContain("MAIL_ALLOWLIST");
+  });
+
+  it("ignores a 'viewed' callback replayed against an envelope that doesn't exist", async () => {
+    const response = await tryContract();
+    expect(response.statusCode).toBe(201);
+    const forged = esign.callback("viewed", "fake-envelope-nobody-made");
+    await app.inject({ method: "POST", url: "/webhooks/esign", ...multipart(forged) });
+    const old = esign.callback(
+      "viewed",
+      (await ownerQuery<{ e: string }>("SELECT provider_envelope_id AS e FROM contracts"))[0]?.e ?? "",
+      String(Math.floor(Date.now() / 1000) - 2 * 3600),
+    );
+    await app.inject({ method: "POST", url: "/webhooks/esign", ...multipart(old) });
+    expect(await ownerQuery("SELECT view_count FROM contracts")).toEqual([{ view_count: 0 }]);
+  });
+});

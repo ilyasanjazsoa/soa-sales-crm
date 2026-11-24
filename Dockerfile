@@ -14,7 +14,10 @@ COPY . .
 RUN pnpm --filter @soa/web build
 
 FROM node:22.20-bookworm-slim
-ENV NODE_ENV=production WEB_DIST_DIR=/app/apps/web/dist
+# The RDS certificate authorities, so the database connection can verify the server (sslmode=verify-full).
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/certs/rds-global-bundle.pem
+RUN chmod 644 /etc/ssl/certs/rds-global-bundle.pem
+ENV NODE_ENV=production WEB_DIST_DIR=/app/apps/web/dist NODE_EXTRA_CA_CERTS=/etc/ssl/certs/rds-global-bundle.pem
 WORKDIR /app
 RUN useradd --system --uid 10001 crm
 COPY --from=build --chown=crm:crm /app /app

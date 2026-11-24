@@ -102,3 +102,43 @@ resource "aws_vpc_endpoint" "bedrock_runtime" {
   security_group_ids  = [aws_security_group.endpoints.id]
   private_dns_enabled = true
 }
+
+# VPC flow logs (accepted and rejected traffic), kept 90 days.
+resource "aws_cloudwatch_log_group" "flow" {
+  name              = "/${local.name}/vpc-flow"
+  retention_in_days = 90
+}
+
+data "aws_iam_policy_document" "flow_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["vpc-flow-logs.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "flow" {
+  name               = "${local.name}-flow-logs"
+  assume_role_policy = data.aws_iam_policy_document.flow_assume.json
+}
+
+resource "aws_iam_role_policy" "flow" {
+  role = aws_iam_role.flow.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
+      Resource = "${aws_cloudwatch_log_group.flow.arn}:*"
+    }]
+  })
+}
+
+resource "aws_flow_log" "main" {
+  vpc_id          = aws_vpc.main.id
+  traffic_type    = "ALL"
+  log_destination = aws_cloudwatch_log_group.flow.arn
+  iam_role_arn    = aws_iam_role.flow.arn
+}

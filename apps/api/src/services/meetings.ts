@@ -56,6 +56,8 @@ export interface MeetingDeps {
   refresher: TokenRefresher;
   cipher: TokenCipher;
   clock: Clock;
+  /** Staging (MAIL_ALLOWLIST): an invite is an email, so only allow-listed addresses are invited. */
+  allowlist?: readonly string[] | null;
 }
 
 const LOOKAHEAD_MS = 16 * 24 * 60 * 60 * 1000; // 10 business days and the weekends between
@@ -328,6 +330,7 @@ export function createMeetingsService(deps: MeetingDeps) {
             contact?.email != null &&
             contact.emailStatus === "ok" &&
             !account.doNotContact &&
+            (deps.allowlist == null || deps.allowlist.includes(contact.email.toLowerCase())) &&
             (await suppressionListRepo(tx).reason(scope, contact.email)) === null;
           const title = `${MEETING_KIND_LABELS[request.kind]}: ${account.name}`;
           const location =

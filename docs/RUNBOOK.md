@@ -51,9 +51,14 @@ Once per environment.
    `crm_app` itself is created by the first migration. The api refuses to start if its login is a superuser, owns
    the schema, or can change `audit_log`.
 7. **Secrets.** Fill the secret (see section 5 for each value), then deploy (section 2). The first deploy's
-   migration task creates the schema.
-8. **GitHub.** In the repository settings, create the environments `staging` and `production` (production with
-   required reviewers). For each, set these variables:
+   migration task creates the schema. The database URLs must verify the server's certificate (the image includes
+   the RDS certificate authorities):
+   `postgres://crm_app_login:<password>@<db_endpoint>:5432/crm?sslmode=verify-full`. `MIGRATION_DATABASE_URL` is
+   the same with the `crm_owner` login, and only the migration task receives it.
+8. **GitHub.** In the repository settings, create the environments `staging` and `production`. Restrict both to the
+   protected `main` branch ("Deployment branches": selected branches → `main`), and give production required
+   reviewers. The AWS deploy role also trusts only `deploy.yml` on `main`. For each environment, set these
+   variables:
    - `AWS_REGION`
    - `DEPLOY_ROLE_ARN` (the `deploy_role_arn` output)
    - `ECR_REPOSITORY` (the `ecr_repository` output)

@@ -21,6 +21,10 @@ describe("web app", () => {
       expect(route.headers["content-security-policy"]).toContain("script-src 'self'");
       const escape = await app.inject({ method: "GET", url: "/%2e%2e/%2e%2e/etc/passwd" });
       expect(escape.body).toContain("<title>CRM</title>");
+      for (const url of ["/p/x/y", "/u/a/b", "/webhooks/nope", "/webhooks"]) {
+        const response = await app.inject({ method: "GET", url });
+        expect(response.body, url).not.toContain("<title>CRM</title>");
+      }
       const api = await app.inject({ method: "GET", url: "/api/nope" });
       expect(api.statusCode).toBe(404);
       expect((await app.inject({ method: "GET", url: "/healthz" })).statusCode).toBe(200);

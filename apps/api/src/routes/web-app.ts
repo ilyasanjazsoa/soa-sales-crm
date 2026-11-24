@@ -41,7 +41,10 @@ export function registerWebApp(app: FastifyInstance, dir: string): void {
 
   app.get("/*", publicRoute, async (request, reply) => {
     const path = request.url.split("?")[0] ?? "/";
-    if (path.startsWith("/api/")) return reply.code(404).send({ error: { code: "not_found", message: "Not found." } });
+    // /api, and the public prefixes the load balancer opens to the internet, never fall through to the app.
+    if (/^\/(api|p|u|webhooks)(\/|$)/.test(path)) {
+      return reply.code(404).send({ error: { code: "not_found", message: "Not found." } });
+    }
     const file = (await fileFor(path)) ?? join(root, "index.html");
     const type = TYPES[extname(file)] ?? "application/octet-stream";
     const immutable = file.startsWith(join(root, "assets") + sep);

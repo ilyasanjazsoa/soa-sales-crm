@@ -101,10 +101,14 @@ resource "aws_iam_role_policy" "task" {
         Resource = "${aws_s3_bucket.files.arn}/*"
       },
       {
-        Sid      = "Bedrock"
-        Effect   = "Allow"
-        Action   = ["bedrock:InvokeModel", "bedrock:Converse"]
-        Resource = "*"
+        Sid    = "Bedrock"
+        Effect = "Allow"
+        Action = ["bedrock:InvokeModel", "bedrock:Converse"]
+        # Foundation models (any region, for cross-region inference profiles) and this account's profiles.
+        Resource = [
+          "arn:aws:bedrock:*::foundation-model/*",
+          "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/*",
+        ]
       },
       {
         Sid      = "BackupCheck"
@@ -140,7 +144,14 @@ locals {
     var.app_environment,
   )
   environment = [for key, value in local.base_environment : { name = key, value = value }]
-  secrets     = [for key in local.secret_keys : { name = key, valueFrom = "${aws_secretsmanager_secret.app.arn}:${key}::" }]
+  # The schema owner's login (MIGRATION_DATABASE_URL) goes only to the migration task: the api and worker run as
+  # crm_app and must never hold credentials that could rewrite audit_log or the schema.
+  secrets_for = {
+    for role in ["api", "worker", "migrate"] : role => [
+      for key in local.secret_keys : { name = key, valueFrom = "${aws_secretsmanager_secret.app.arn}:${key}::" }
+      if role == "migrate" || key != "MIGRATION_DATABASE_URL"
+    ]
+  }
   container = {
     for role in ["api", "worker", "migrate"] : role => {
       name                   = role
@@ -148,7 +159,7 @@ locals {
       command                = [role]
       essential              = true
       environment            = local.environment
-      secrets                = local.secrets
+      secrets                = local.secrets_for[role]
       portMappings           = role == "api" ? [{ containerPort = 3000, protocol = "tcp" }] : []
       readonlyRootFilesystem = false
       logConfiguration = {
