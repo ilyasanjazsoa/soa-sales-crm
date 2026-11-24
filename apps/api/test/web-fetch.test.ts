@@ -198,7 +198,9 @@ describe("nodeTransport (real sockets)", () => {
     const server = createServer((_request, response) => {
       response.writeHead(200, { "content-type": "text/plain" });
       const drip = setInterval(() => response.write("."), 50);
-      response.on("close", () => { clearInterval(drip); });
+      response.on("close", () => {
+        clearInterval(drip);
+      });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
