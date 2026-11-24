@@ -23,6 +23,15 @@ Everything Claude Code needs to build the sales CRM for 5 account executives and
 3. Open the repository in Claude Code and paste the Milestone 0 prompt from `docs/MILESTONES.md`.
 4. Work through the milestones in order. Don't skip the acceptance checks or the review prompt.
 
+## Run it locally
+
+```
+pnpm install
+pnpm env:init          # creates .env with generated secrets (pnpm dev also does this on first run)
+docker compose up -d   # postgres, minio, mailpit
+pnpm dev               # web on http://localhost:5173, api on :3000, worker
+```
+
 ## What to expect
 
 - Milestones 0 to 7 run entirely on your computer with fake email, calendar, AI, maps and e-signature, so you can build and click through the whole product before any account exists.

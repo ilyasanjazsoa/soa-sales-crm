@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EnvError, parseEnv, REAL_PROVIDER_VARIABLES, type EnvSource } from "./env";
 
-const SECRET = "a".repeat(64);
+const secret = (c: string) => c.repeat(64);
 
 const valid = (overrides: Record<string, string | undefined> = {}): EnvSource => ({
   NODE_ENV: "development",
@@ -9,10 +9,10 @@ const valid = (overrides: Record<string, string | undefined> = {}): EnvSource =>
   PUBLIC_URL: "http://localhost:3000",
   APP_URL: "http://localhost:5173",
   DATABASE_URL: "postgres://crm:crm@localhost:5432/crm",
-  SESSION_SECRET: SECRET,
-  TOKEN_ENC_KEY: SECRET,
-  UNSUBSCRIBE_SECRET: SECRET,
-  IP_HASH_SALT: SECRET,
+  SESSION_SECRET: secret("a"),
+  TOKEN_ENC_KEY: secret("b"),
+  UNSUBSCRIBE_SECRET: secret("c"),
+  IP_HASH_SALT: secret("d"),
   IDP: "microsoft",
   ALLOWED_EMAIL_DOMAIN: "soa.example",
   BOOTSTRAP_ADMIN_EMAIL: "admin@soa.example",
@@ -80,5 +80,42 @@ describe("parseEnv", () => {
   it("rejects a bad allow-list entry", () => {
     const error = errorOf(valid({ MAIL_ALLOWLIST: "ok@soa.example,not-an-email" }));
     expect(error.invalid.has("MAIL_ALLOWLIST")).toBe(true);
+  });
+
+  it("reports cross-variable problems together with field problems", () => {
+    const error = errorOf(valid({ FAKE_PROVIDERS: "false", PORT: "http" }));
+    expect(error.invalid.has("PORT")).toBe(true);
+    expect(error.missing).toContain("OIDC_CLIENT_ID");
+  });
+
+  it("requires a non-empty mail allow-list in staging", () => {
+    expect(errorOf(valid({ DEPLOY_ENV: "staging" })).missing).toEqual(["MAIL_ALLOWLIST"]);
+    expect(errorOf(valid({ DEPLOY_ENV: "staging", MAIL_ALLOWLIST: " , ," })).missing).toEqual(["MAIL_ALLOWLIST"]);
+    expect(parseEnv(valid({ DEPLOY_ENV: "staging", MAIL_ALLOWLIST: "qa@soa.example" })).MAIL_ALLOWLIST).toEqual([
+      "qa@soa.example",
+    ]);
+  });
+
+  it.each(["javascript:alert(1)", "mailto:a@soa.example", "ftp://soa.example"])("rejects the URL %s", (url) => {
+    expect(errorOf(valid({ PUBLIC_URL: url })).invalid.get("PUBLIC_URL")).toBe("must be an http(s) URL");
+  });
+
+  it("requires https URLs in production", () => {
+    const error = errorOf(valid({ NODE_ENV: "production", FAKE_PROVIDERS: "false" }));
+    expect(error.invalid.get("PUBLIC_URL")).toBe("must use https in production");
+    expect(error.invalid.get("APP_URL")).toBe("must use https in production");
+  });
+
+  it.each(["1e3", "0x10", "70000", "-1"])("rejects the port %s", (port) => {
+    expect(errorOf(valid({ PORT: port })).invalid.has("PORT")).toBe(true);
+  });
+
+  it("rejects a database URL without a host and database", () => {
+    expect(errorOf(valid({ DATABASE_URL: "postgres://" })).invalid.has("DATABASE_URL")).toBe(true);
+  });
+
+  it("requires the four secrets to differ", () => {
+    const error = errorOf(valid({ TOKEN_ENC_KEY: secret("A") }));
+    expect(error.invalid.get("TOKEN_ENC_KEY")).toBe("must differ from the other secrets");
   });
 });

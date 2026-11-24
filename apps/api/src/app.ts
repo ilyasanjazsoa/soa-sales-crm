@@ -10,15 +10,20 @@ export interface BuildAppOptions {
   logger?: FastifyServerOptions["logger"];
 }
 
-export async function buildApp({ config, logger = loggerOptions }: BuildAppOptions): Promise<FastifyInstance> {
+export async function buildApp({ config, logger }: BuildAppOptions): Promise<FastifyInstance> {
   const database = createDb(config.DATABASE_URL);
-  const app = Fastify({ logger });
+  const app = Fastify({ logger: logger ?? loggerOptions(config) });
   app.addHook("onClose", async () => {
     await database.close();
   });
 
   registerHealthRoutes(app, createHealthService({ isDatabaseUp: () => pingDatabase(database.pool) }));
 
-  await app.ready();
+  try {
+    await app.ready();
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
   return app;
 }

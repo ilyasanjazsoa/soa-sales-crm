@@ -17,7 +17,7 @@ function loadConfig(): Env {
 }
 
 const config = loadConfig();
-const log = pino({ name: "worker", level: process.env.LOG_LEVEL ?? "info" });
+const log = pino({ name: "worker", level: config.LOG_LEVEL ?? "info" });
 const boss = new PgBoss({ connectionString: config.DATABASE_URL });
 
 boss.on("error", (error: Error) => {

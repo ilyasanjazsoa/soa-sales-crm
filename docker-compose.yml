@@ -1,7 +1,8 @@
 # Local development services (ARCHITECTURE.md §2). Credentials here are local-only defaults, not secrets.
+# Images are pinned by digest; update them deliberately.
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16@sha256:07abc3f43c9395b0bdbbab36bc25ddb0e8d83cd4fcafb5fb7d6abe14ff156dd8
     environment:
       POSTGRES_USER: crm
       POSTGRES_PASSWORD: crm
@@ -18,7 +19,7 @@ services:
 
   # MinIO no longer publishes images on Docker Hub or quay.io; Chainguard builds it from the open-source code.
   minio:
-    image: cgr.dev/chainguard/minio:latest
+    image: cgr.dev/chainguard/minio@sha256:f2e56aceb4d38ad9b05c901270946e2353b19f86ba4396f25cf75b15b455b38c
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -41,7 +42,7 @@ services:
 
   # Creates the local bucket named by S3_BUCKET in .env.example, then exits.
   minio-init:
-    image: cgr.dev/chainguard/minio-client:latest
+    image: cgr.dev/chainguard/minio-client@sha256:69e686e3bf20ed53d95c3eeab497f4ea89eddb3c3540000652c11b7a6fe8edb3
     depends_on:
       minio:
         condition: service_healthy
@@ -51,7 +52,7 @@ services:
     restart: "no"
 
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
     ports:
       - "127.0.0.1:1025:1025"
       - "127.0.0.1:8025:8025"

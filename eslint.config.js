@@ -5,7 +5,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 /* CLAUDE.md rule 3: AI is called only through apps/api/src/providers/ai/client.ts.
-   ARCHITECTURE.md §3: only apps/api/src/providers/ai/ and apps/worker may import the Bedrock SDK. */
+   The Bedrock SDK is imported only there; worker jobs call the same client. */
 const otherAiSdks = [
   "@anthropic-ai/*",
   "openai",
@@ -51,7 +51,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/api/src/providers/ai/**", "apps/worker/**"],
+    files: ["apps/api/src/providers/ai/**"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [{ group: otherAiSdks, message: aiMessage }] }],
     },
