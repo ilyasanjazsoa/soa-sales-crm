@@ -20,6 +20,8 @@ export async function advanceDeal(
   if (deal === undefined || next === null) return false;
   const moved = await dealsRepo(tx).update(scope, deal.deal.id, {
     stage: next,
+    // A won stage is a won deal (deals_check).
+    ...(next === "won" ? { status: "won" as const } : {}),
     stageChangedAt: now,
     lastActivityAt: now,
   });

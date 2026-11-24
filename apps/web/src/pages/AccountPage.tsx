@@ -35,6 +35,7 @@ import { choosableStages, LoseDialog, needsOverrideReason, OverrideDialog, Stage
 import { useMe } from "../session";
 import { MeetingsTab } from "./Meetings";
 import { OutreachTab } from "./Outreach";
+import { ContractTab, ProposalTab } from "./Proposals";
 import { ResearchTab } from "./Research";
 import { Btn, Empty, ErrorState, Field, inputClass, Loading, Modal, Panel, Pill } from "../ui";
 
@@ -42,20 +43,8 @@ const TABS: { id: string; label: string; icon: LucideIcon; milestone?: number; w
   { id: "research", label: "Research", icon: Sparkles },
   { id: "outreach", label: "Outreach", icon: Send },
   { id: "meetings", label: "Meetings", icon: Calendar },
-  {
-    id: "proposal",
-    label: "Proposal",
-    icon: DollarSign,
-    milestone: 6,
-    what: "Package, price, PDF proposal and share link.",
-  },
-  {
-    id: "contract",
-    label: "Contract",
-    icon: Pen,
-    milestone: 6,
-    what: "E-signature; a signed contract marks the deal Won.",
-  },
+  { id: "proposal", label: "Proposal", icon: DollarSign },
+  { id: "contract", label: "Contract", icon: Pen },
   { id: "timeline", label: "Timeline", icon: History },
 ];
 
@@ -595,6 +584,10 @@ export function AccountPage() {
             <OutreachTab account={a} />
           ) : current?.id === "meetings" ? (
             <MeetingsTab account={a} />
+          ) : current?.id === "proposal" ? (
+            <ProposalTab account={a} />
+          ) : current?.id === "contract" ? (
+            <ContractTab account={a} />
           ) : (
             <Panel title={current?.label ?? ""} icon={current?.icon}>
               <p className="text-sm text-zinc-300">{current?.what}</p>

@@ -494,17 +494,17 @@ export function createProposalsService(deps: ProposalDeps) {
     /** §10.2: fill the agreement and send the envelope (the client signs first, the company second). */
     async createContract(scope: UserScope, proposalId: string, request: CreateContractRequest, ip: string | null) {
       const now = clock();
-      const signerName = config.COMPANY_SIGNER_NAME;
-      const signerEmail = config.COMPANY_SIGNER_EMAIL;
-      if (signerName === undefined || signerEmail === undefined) {
-        throw unprocessable(
-          "no_company_signer",
-          "The company counter-signer isn't set (COMPANY_SIGNER_NAME and COMPANY_SIGNER_EMAIL).",
-        );
-      }
       const id = await db.transaction(async (tx) => {
         const row = await proposalsRepo(tx).lockEditable(scope, proposalId);
         if (row === undefined) throw notFound();
+        const signerName = config.COMPANY_SIGNER_NAME;
+        const signerEmail = config.COMPANY_SIGNER_EMAIL;
+        if (signerName === undefined || signerEmail === undefined) {
+          throw unprocessable(
+            "no_company_signer",
+            "The company counter-signer isn't set (COMPANY_SIGNER_NAME and COMPANY_SIGNER_EMAIL).",
+          );
+        }
         const { proposal } = row;
         if (proposal.status !== "sent" && proposal.status !== "viewed") {
           throw conflict("not_sent", "Send the proposal before sending a contract.");
@@ -724,6 +724,13 @@ export function createProposalsService(deps: ProposalDeps) {
     },
 
     readPdf: (key: string) => store.get(key),
+
+    /** FAKE_PROVIDERS: the envelope of a contract, so the dev-only route can play the provider's callback. */
+    async envelopeOf(contractId: string): Promise<string> {
+      const row = await contractsRepo(db).get(systemScope("fake e-sign"), contractId);
+      if (row?.contract.providerEnvelopeId == null) throw notFound();
+      return row.contract.providerEnvelopeId;
+    },
   };
 }
 

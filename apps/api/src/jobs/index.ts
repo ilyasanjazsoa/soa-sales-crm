@@ -13,3 +13,4 @@ export { createTokenCipher } from "../auth/crypto";
 export { morningPrepDue, queueMorningPrep, runCalendarSync, runPrepGenerate } from "../services/meetings";
 export { createCalendarProvider, createMapsProvider, createTokenRefresher } from "../providers/factories";
 export { createDriveTimes } from "../providers/maps/cache";
+export { runProposalRender } from "../services/proposals";
