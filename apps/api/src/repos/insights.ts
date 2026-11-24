@@ -2,7 +2,7 @@ import { tables, type Executor } from "@soa/db";
 import type { DealStage } from "@soa/shared";
 import { and, asc, desc, eq, gte, ilike, lt, sql, type SQL } from "drizzle-orm";
 import { accountVisible } from "./visibility";
-import { seesEverything, type Scope, type UserScope } from "./scope";
+import { seesEverything, type UserScope } from "./scope";
 
 /* Read-only, scoped queries behind Today (§11.1) and Ask Sales AI (§11.2). An AE sees only their own deals and
    messages (and accounts they may see); managers see everything. Nothing here changes data. */
@@ -46,11 +46,13 @@ export function insightsRepo(db: Executor) {
           contactName: sql<
             string | null
           >`(SELECT trim(c.first_name || ' ' || c.last_name) FROM ${contacts} c WHERE c.account_id = ${deals.accountId} ORDER BY c.is_primary DESC, c.created_at LIMIT 1)`,
-          outboundCount: sql<number>`(SELECT count(*)::int FROM ${emailMessages} e WHERE e.account_id = ${deals.accountId} AND e.user_id = ${me} AND e.direction = 'out' AND e.status IN ('queued', 'sent'))`,
-          lastOutboundAt: sql<Date | null>`(SELECT max(coalesce(e.sent_at, e.created_at)) FROM ${emailMessages} e WHERE e.account_id = ${deals.accountId} AND e.user_id = ${me} AND e.direction = 'out' AND e.status IN ('queued', 'sent'))`,
-          loggedTouches: sql<number>`(SELECT count(*)::int FROM ${activities} a WHERE a.account_id = ${deals.accountId} AND a.user_id = ${me} AND a.type IN ('call', 'voicemail', 'linkedin'))`,
-          lastInboundAt: sql<Date | null>`(SELECT max(e.received_at) FROM ${emailMessages} e WHERE e.account_id = ${deals.accountId} AND e.direction = 'in' AND e.status = 'received')`,
-          lastInterestedAt: sql<Date | null>`(SELECT max(e.received_at) FROM ${emailMessages} e WHERE e.account_id = ${deals.accountId} AND e.direction = 'in' AND e.ai_classification = 'interested')`,
+          // Since this deal was created, by anyone on the account (a reply answered by a colleague is answered).
+          outboundCount: sql<number>`(SELECT count(*)::int FROM ${emailMessages} e WHERE e.account_id = ${deals.accountId} AND e.direction = 'out' AND e.status IN ('queued', 'sent') AND e.created_at >= ${deals.createdAt})`,
+          lastOutboundAt: sql<Date | null>`(SELECT max(coalesce(e.sent_at, e.created_at)) FROM ${emailMessages} e WHERE e.account_id = ${deals.accountId} AND e.direction = 'out' AND e.status IN ('queued', 'sent') AND e.created_at >= ${deals.createdAt})`,
+          loggedTouches: sql<number>`(SELECT count(*)::int FROM ${activities} a WHERE a.account_id = ${deals.accountId} AND a.type IN ('call', 'voicemail', 'linkedin') AND a.occurred_at >= ${deals.createdAt})`,
+          lastLoggedTouchAt: sql<Date | null>`(SELECT max(a.occurred_at) FROM ${activities} a WHERE a.account_id = ${deals.accountId} AND a.type IN ('call', 'voicemail', 'linkedin') AND a.occurred_at >= ${deals.createdAt})`,
+          lastInboundAt: sql<Date | null>`(SELECT max(e.received_at) FROM ${emailMessages} e WHERE e.account_id = ${deals.accountId} AND e.direction = 'in' AND e.status = 'received' AND e.received_at >= ${deals.createdAt})`,
+          lastInterestedAt: sql<Date | null>`(SELECT max(e.received_at) FROM ${emailMessages} e WHERE e.account_id = ${deals.accountId} AND e.direction = 'in' AND e.ai_classification = 'interested' AND e.received_at >= ${deals.createdAt})`,
           interestedContact: sql<
             string | null
           >`(SELECT coalesce(trim(c.first_name || ' ' || c.last_name), e.from_email) FROM ${emailMessages} e LEFT JOIN ${contacts} c ON c.id = e.contact_id WHERE e.account_id = ${deals.accountId} AND e.direction = 'in' AND e.ai_classification = 'interested' ORDER BY e.received_at DESC LIMIT 1)`,
@@ -63,9 +65,10 @@ export function insightsRepo(db: Executor) {
           contractSigner: sql<
             string | null
           >`(SELECT trim(c.first_name || ' ' || c.last_name) FROM ${contracts} k JOIN ${contacts} c ON c.id = k.signer_contact_id WHERE k.deal_id = ${deals.id} AND k.status IN ('sent', 'viewed') ORDER BY k.created_at DESC LIMIT 1)`,
+          // Only signals a rep confirmed: an AI-found one is "unconfirmed" until then (§7.2 rule 3).
           topSignal: sql<
             string | null
-          >`(SELECT s.text FROM ${signals} s WHERE s.account_id = ${deals.accountId} ORDER BY s.confirmed DESC, s.created_at DESC LIMIT 1)`,
+          >`(SELECT s.text FROM ${signals} s WHERE s.account_id = ${deals.accountId} AND s.confirmed ORDER BY (s.kind = 'incident') DESC, s.created_at DESC LIMIT 1)`,
         })
         .from(deals)
         .innerJoin(accounts, eq(accounts.id, deals.accountId))
@@ -74,11 +77,31 @@ export function insightsRepo(db: Executor) {
         .limit(500);
     },
 
-    /** The rep's own deals (Today's numbers are per rep). */
-    async ownDeals(scope: UserScope) {
-      return dealQuery()
-        .where(and(eq(deals.ownerUserId, scope.userId), accountVisible(scope)))
-        .limit(1000);
+    /** The rep's own open deals (for the pipeline and weighted forecast). */
+    async ownOpenDeals(scope: UserScope) {
+      return db
+        .select({ stage: deals.stage, status: deals.status, annualValueCents: deals.annualValueCents })
+        .from(deals)
+        .innerJoin(accounts, eq(accounts.id, deals.accountId))
+        .where(and(eq(deals.ownerUserId, scope.userId), eq(deals.status, "open"), accountVisible(scope)));
+    },
+
+    /** The value of the rep's deals won in the window. */
+    async wonBetween(scope: UserScope, from: Date, to: Date): Promise<number> {
+      const [row] = await db
+        .select({ total: sql<string>`coalesce(sum(${deals.annualValueCents}), 0)` })
+        .from(deals)
+        .innerJoin(accounts, eq(accounts.id, deals.accountId))
+        .where(
+          and(
+            eq(deals.ownerUserId, scope.userId),
+            eq(deals.status, "won"),
+            gte(deals.stageChangedAt, from),
+            lt(deals.stageChangedAt, to),
+            accountVisible(scope),
+          ),
+        );
+      return Number(row?.total ?? 0);
     },
 
     // ───────── Ask's fixed functions ─────────
@@ -175,5 +198,3 @@ export function insightsRepo(db: Executor) {
     },
   };
 }
-
-export type ScopeForInsights = Scope;

@@ -306,6 +306,7 @@ CREATE TABLE email_messages (
 );
 CREATE INDEX email_messages_thread_idx ON email_messages (provider, provider_thread_id);
 CREATE INDEX email_messages_user_sent_idx ON email_messages (user_id, sent_at) WHERE direction = 'out';
+CREATE INDEX email_messages_account_idx ON email_messages (account_id, direction);   -- Today's per-deal facts (§11.1)
 
 -- Checked on every send. Company-wide: one rep's unsubscribe applies to all reps.
 CREATE TABLE suppressions (

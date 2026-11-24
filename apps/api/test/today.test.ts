@@ -54,6 +54,19 @@ describe("GET /today", () => {
     expect(today.actions.length).toBeGreaterThan(0);
     const order = today.actions.map((action) => [action.priority, -action.valueCents]);
     expect(order).toEqual([...order].sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0) || (a[1] ?? 0) - (b[1] ?? 0)));
+    const [weighted] = await ownerQuery<{ w: string }>(
+      `SELECT coalesce(round(sum(annual_value_cents * CASE stage WHEN 'lead' THEN 0.05 WHEN 'researched' THEN 0.10
+        WHEN 'contacted' THEN 0.20 WHEN 'meeting_set' THEN 0.35 WHEN 'proposal' THEN 0.55 WHEN 'contract_sent' THEN 0.80
+        ELSE 1 END)), 0) AS w FROM deals WHERE owner_user_id = $1 AND status = 'open'`,
+      [await priyaId()],
+    );
+    expect(Math.abs(today.stats.weightedForecastCents - Number(weighted?.w))).toBeLessThanOrEqual(1);
+    const [won] = await ownerQuery<{ won: string }>(
+      `SELECT coalesce(sum(annual_value_cents), 0) AS won FROM deals WHERE owner_user_id = $1 AND status = 'won'
+       AND stage_changed_at >= $2 AND stage_changed_at < $3`,
+      [await priyaId(), zonedTime(2026, 1, 1, 0, 0, TZ), zonedTime(2026, 4, 1, 0, 0, TZ)],
+    );
+    expect(today.stats.wonThisQuarterCents).toBe(Number(won?.won));
     expect(today.schedule.label).toBe("today");
     expect(today.schedule.from).toBe(zonedTime(2026, 3, 10, 0, 0, TZ).toISOString());
   });
@@ -156,6 +169,29 @@ describe("Ask Sales AI", () => {
       { ok: false, error: "invalid_output" },
       { ok: false, error: "invalid_output" },
     ]); // the plan and its one retry; no answer step ran
+  });
+
+  it('keeps a manager\'s "my" questions to their own deals', async () => {
+    session = await signIn(app, "renee.hartwell@soa.example");
+    const result = await ask("Show my deals");
+    expect(result.calls).toEqual(["myOpenDeals"]);
+    const [own] = await ownerQuery<{ n: number }>(
+      "SELECT count(*)::int AS n FROM deals d JOIN users u ON u.id = d.owner_user_id WHERE u.email = 'renee.hartwell@soa.example' AND d.status = 'open'",
+    );
+    expect(result.items.length).toBe(Math.min(own?.n ?? 0, 10));
+  });
+
+  it("shows the CRM's own text for each item, never the model's", async () => {
+    respond = (request) => {
+      if (request.feature !== "ask" || !request.messages.some((message) => message.text.includes('"results"')))
+        return undefined;
+      const link = /"link": "(\/accounts\/[^"]+)"/.exec(request.messages.map((m) => m.text).join("\n"))?.[1] ?? "";
+      return { answer: "Here.", items: [{ label: "Signed! $900k", sub: "made up", link }] };
+    };
+    const result = await ask("What's stalled?");
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.label).not.toContain("Signed");
+    expect(result.items[0]?.sub).not.toBe("made up");
   });
 
   it("drops links the queries didn't return", async () => {

@@ -1,0 +1,1 @@
+CREATE INDEX "email_messages_account_idx" ON "email_messages" USING btree ("account_id","direction");
