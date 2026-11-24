@@ -33,7 +33,8 @@ import { localDay, type MeetingsService } from "./meetings";
    server runs them under the caller's scope, and the writer answers from those results only (rules 3 to 5). */
 
 const DAY = 86_400_000;
-const DRAFT = /\b(draft|write|compose)\b/i;
+/** "Draft an email for X", "write a follow-up to X": a request to write something for an account. */
+const DRAFT = /\b(draft|write|compose)\b[^?]*\b(for|to)\b/i;
 
 interface Result {
   fn: AskCall["fn"];
@@ -103,7 +104,7 @@ export function createTodayService(deps: { db: Database; ai: AiClient; meetings:
         );
         return {
           fn: call.fn,
-          summary: `${plural(rows.length, "meeting")} from ${call.from} to ${call.to}.`,
+          summary: `${plural(rows.length, "meeting")} from ${call.from} to ${localDay(new Date(to.getTime() - 1), timeZone)}.`,
           items: rows.map((row) => ({
             label: row.meeting.title,
             sub: `${localDay(row.meeting.startsAt, timeZone)} ${formatTime(row.meeting.startsAt, timeZone)} · ${MEETING_KIND_LABELS[row.meeting.kind]}`,
@@ -166,9 +167,12 @@ export function createTodayService(deps: { db: Database; ai: AiClient; meetings:
       const user = await rep(scope);
       const zone = user.timezone;
       const repo = insightsRepo(db);
-      const [facts, own, tasks, upcoming] = await Promise.all([
+      const week = weekWindow(now, zone);
+      const quarter = quarterWindow(now, zone);
+      const [facts, open, wonThisQuarter, tasks, upcoming] = await Promise.all([
         repo.nbaDeals(scope),
-        repo.ownDeals(scope),
+        repo.ownOpenDeals(scope),
+        repo.wonBetween(scope, quarter.from, quarter.to),
         tasksRepo(db).list(scope, { open: true }),
         meetingsRepo(db).between(scope, new Date(now.getTime() - DAY), new Date(now.getTime() + 5 * DAY), scope.userId),
       ]);
@@ -184,6 +188,7 @@ export function createTodayService(deps: { db: Database; ai: AiClient; meetings:
         outboundCount: row.outboundCount,
         lastOutboundAt: row.lastOutboundAt === null ? null : new Date(row.lastOutboundAt),
         loggedTouches: row.loggedTouches,
+        lastLoggedTouchAt: row.lastLoggedTouchAt === null ? null : new Date(row.lastLoggedTouchAt),
         lastInboundAt: row.lastInboundAt === null ? null : new Date(row.lastInboundAt),
         lastInterestedAt: row.lastInterestedAt === null ? null : new Date(row.lastInterestedAt),
         interestedContact: row.interestedContact,
@@ -220,10 +225,7 @@ export function createTodayService(deps: { db: Database; ai: AiClient; meetings:
         })),
       });
 
-      // The four numbers, for the rep's own deals.
-      const open = own.filter((deal) => deal.status === "open");
-      const week = weekWindow(now, zone);
-      const quarter = quarterWindow(now, zone);
+      // The four numbers, for the rep's own deals (summed by the database).
       const weekMeetings = await meetingsRepo(db).between(scope, week.from, week.to, scope.userId);
       const stats = {
         openPipelineCents: open.reduce((sum, deal) => sum + deal.annualValueCents, 0),
@@ -231,11 +233,7 @@ export function createTodayService(deps: { db: Database; ai: AiClient; meetings:
         meetingsThisWeek: weekMeetings.filter(
           (row) => row.meeting.kind !== "internal" && row.meeting.status !== "cancelled",
         ).length,
-        wonThisQuarterCents: own
-          .filter(
-            (deal) => deal.status === "won" && deal.stageChangedAt >= quarter.from && deal.stageChangedAt < quarter.to,
-          )
-          .reduce((sum, deal) => sum + deal.annualValueCents, 0),
+        wonThisQuarterCents: wonThisQuarter,
       };
 
       // The schedule: today, or next week from Friday 3 pm through Sunday.
@@ -338,7 +336,14 @@ export function createTodayService(deps: { db: Database; ai: AiClient; meetings:
                 .map((item) => `The link ${item.link} is not in the results. Use only links from the results.`),
           })
         ).data;
-        return { ...answer, calls };
+        // Only the model's choice of links is used: each item is the server's own result item for that link, so
+        // its label and details are what the CRM returned, never text the model wrote.
+        const byLink = new Map(results.flatMap((result) => result.items.map((item) => [item.link, item] as const)));
+        const items = [...new Set(answer.items.map((item) => item.link))].flatMap((link) => {
+          const item = byLink.get(link);
+          return item === undefined ? [] : [item];
+        });
+        return { answer: answer.answer, items, calls };
       } catch (error) {
         if (error instanceof Error && error.name === "HttpError") throw error;
         // The model's answer couldn't be used: show the query results as they are.

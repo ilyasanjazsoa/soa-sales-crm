@@ -27,6 +27,7 @@ const deal = (overrides: Partial<NbaDeal> = {}): NbaDeal => ({
   outboundCount: 0,
   lastOutboundAt: null,
   loggedTouches: 0,
+  lastLoggedTouchAt: null,
   lastInboundAt: null,
   lastInterestedAt: null,
   interestedContact: null,
@@ -168,6 +169,20 @@ describe("rule 3: contacted, no reply for 4 days, fewer than 3 touches", () => {
     const [action] = run({ deals: [deal({ outboundCount: 1, lastOutboundAt: daysAgo(4) })] });
     expect(action?.text).toBe("No reply from Dana Whitfield in 4 days.");
   });
+  it("also counts a logged call as the last touch", () => {
+    expect(rules({ deals: [deal({ loggedTouches: 1, lastLoggedTouchAt: daysAgo(5) })] })).toEqual([
+      "contacted_no_reply",
+    ]);
+    // A call after an interested reply answers it.
+    expect(
+      rules({
+        deals: [
+          deal({ stage: "meeting_set", lastInterestedAt: daysAgo(2), loggedTouches: 1, lastLoggedTouchAt: daysAgo(1) }),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
   it("doesn't trigger after a reply, too soon, or after 3 touches", () => {
     expect(
       rules({ deals: [deal({ outboundCount: 1, lastOutboundAt: daysAgo(5), lastInboundAt: daysAgo(1) })] }),
@@ -201,6 +216,7 @@ describe("rule 4: lead needs research", () => {
 describe("rule 4: task due today or overdue", () => {
   it("triggers for today and overdue", () => {
     expect(rules({ tasks: [task(), task({ id: "t2", dueAt: daysAgo(3) })] })).toEqual(["task_due", "task_due"]);
+    expect(rules({ tasks: [task({ dueAt: zonedTime(2026, 3, 10, 23, 59, TZ) })] })).toEqual(["task_due"]);
   });
   it("doesn't trigger for a later, undated or done task", () => {
     expect(rules({ tasks: [task({ dueAt: zonedTime(2026, 3, 11, 9, 0, TZ) })] })).toEqual([]);
@@ -214,16 +230,17 @@ describe("ordering", () => {
     const actions = run({
       meetings: [meeting({ accountId: "a2" })],
       deals: [
-        deal({ id: "small", accountId: "a3", stage: "lead", annualValueCents: 1_000 }),
-        deal({ id: "big", accountId: "a4", stage: "lead", annualValueCents: 9_000 }),
+        // Keys chosen so the alphabetical tiebreak would put them the other way round: value decides.
+        deal({ id: "a-small", accountId: "a3", stage: "lead", annualValueCents: 1_000 }),
+        deal({ id: "z-big", accountId: "a4", stage: "lead", annualValueCents: 9_000 }),
         deal({ id: "reply", accountId: "a5", lastInterestedAt: daysAgo(1), annualValueCents: 10 }),
       ],
     });
     expect(actions.map((action) => [action.priority, action.key])).toEqual([
       [0, "meeting:m1"],
       [1, "interested_reply:reply"],
-      [4, "lead_needs_research:big"],
-      [4, "lead_needs_research:small"],
+      [4, "lead_needs_research:z-big"],
+      [4, "lead_needs_research:a-small"],
     ]);
   });
 });

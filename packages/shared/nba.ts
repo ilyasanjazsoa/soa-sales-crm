@@ -27,8 +27,9 @@ export interface NbaDeal {
   /** Emails on the deal's account sent by the rep. */
   outboundCount: number;
   lastOutboundAt: Date | null;
-  /** Calls, voicemails and LinkedIn notes logged (they count as touches). */
+  /** Calls, voicemails and LinkedIn notes logged (they count as touches), and the latest. */
   loggedTouches: number;
+  lastLoggedTouchAt: Date | null;
   lastInboundAt: Date | null;
   /** The latest reply classified `interested`, and who sent it. */
   lastInterestedAt: Date | null;
@@ -119,6 +120,11 @@ export function nextBestActions(input: {
     if (deal.status !== "open") continue;
     const contact = deal.contactName ?? "Your contact";
     const touches = deal.outboundCount + deal.loggedTouches;
+    // The latest outreach of any kind: an email, or a logged call, voicemail or LinkedIn note.
+    const lastTouchAt = [deal.lastOutboundAt, deal.lastLoggedTouchAt].reduce<Date | null>(
+      (latest, at) => (at !== null && (latest === null || at > latest) ? at : latest),
+      null,
+    );
     const repliedSince = (since: Date | null) =>
       since !== null && deal.lastInboundAt !== null && deal.lastInboundAt > since;
     const push = (priority: number, rule: string, text: string, label: string, tab: string) => {
@@ -133,10 +139,7 @@ export function nextBestActions(input: {
     };
 
     // 1: an interested reply with no outbound email since.
-    if (
-      deal.lastInterestedAt !== null &&
-      (deal.lastOutboundAt === null || deal.lastOutboundAt < deal.lastInterestedAt)
-    ) {
+    if (deal.lastInterestedAt !== null && (lastTouchAt === null || lastTouchAt < deal.lastInterestedAt)) {
       push(
         1,
         "interested_reply",
@@ -188,15 +191,15 @@ export function nextBestActions(input: {
     // 3: contacted, no reply for 4 days, fewer than 3 touches.
     if (
       deal.stage === "contacted" &&
-      deal.lastOutboundAt !== null &&
-      daysBetween(deal.lastOutboundAt, now) >= 4 &&
-      !repliedSince(deal.lastOutboundAt) &&
+      lastTouchAt !== null &&
+      daysBetween(lastTouchAt, now) >= 4 &&
+      !repliedSince(lastTouchAt) &&
       touches < 3
     ) {
       push(
         3,
         "contacted_no_reply",
-        `No reply from ${contact} in ${String(daysBetween(deal.lastOutboundAt, now))} days.`,
+        `No reply from ${contact} in ${String(daysBetween(lastTouchAt, now))} days.`,
         "Draft follow-up",
         "outreach",
       );
@@ -206,7 +209,7 @@ export function nextBestActions(input: {
       push(
         3,
         "researched_no_outreach",
-        `${deal.accountName} is researched but not contacted.${deal.topSignal === null ? "" : ` Lead with: ${deal.topSignal}`}`,
+        `${deal.accountName} is researched but not contacted.${deal.topSignal === null ? "" : ` Lead with: ${/[.!?]$/.test(deal.topSignal) ? deal.topSignal : `${deal.topSignal}.`}`}`,
         "Start outreach",
         "outreach",
       );
@@ -218,12 +221,12 @@ export function nextBestActions(input: {
   }
 
   // 4: tasks due today or overdue.
-  const endOfToday = (() => {
+  const startOfTomorrow = (() => {
     const p = localParts(now, zone);
-    return zonedTime(p.year, p.month, p.day, 23, 59, zone);
+    return zonedTime(p.year, p.month, p.day + 1, 0, 0, zone);
   })();
   for (const task of input.tasks) {
-    if (task.doneAt !== null || task.dueAt === null || task.dueAt > endOfToday) continue;
+    if (task.doneAt !== null || task.dueAt === null || task.dueAt >= startOfTomorrow) continue;
     actions.push({
       key: `task:${task.id}`,
       priority: 4,

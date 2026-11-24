@@ -68,8 +68,8 @@ function AskBox({ autoFocus = false, onNavigate }: { autoFocus?: boolean; onNavi
           <p className="text-sm text-zinc-100">{ask.data.answer}</p>
           {ask.data.items.length > 0 && (
             <ul className="divide-y divide-zinc-800">
-              {ask.data.items.map((item) => (
-                <li key={`${item.link}-${item.label}`} className="py-1.5">
+              {ask.data.items.map((item, index) => (
+                <li key={`${String(index)}-${item.link}`} className="py-1.5">
                   <Link to={item.link} onClick={onNavigate} className="text-sm text-blue-300 hover:underline">
                     {item.label}
                   </Link>
@@ -106,6 +106,8 @@ export function AskPalette() {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        // Not on top of another dialog (one Escape would close both).
+        if (document.querySelector('[role="dialog"]:not([aria-label="Ask Sales AI"])') !== null) return;
         setOpen((value) => !value);
       }
     };
