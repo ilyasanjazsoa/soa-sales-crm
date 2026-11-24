@@ -114,30 +114,30 @@ export function AdminPricingPage() {
         ) : (
           <dl className="grid gap-2 text-sm sm:grid-cols-3">
             <div>
-              <dt className="text-xs text-zinc-500">Unarmed / armed</dt>
+              <dt className="text-xs text-zinc-400">Unarmed / armed</dt>
               <dd className="text-zinc-100">
                 {formatCentsExact(live.hourlyRateCents.unarmed)} / {formatCentsExact(live.hourlyRateCents.armed)} an
                 hour
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-zinc-500">Supervisor multiplier</dt>
+              <dt className="text-xs text-zinc-400">Supervisor multiplier</dt>
               <dd className="text-zinc-100">×{live.supervisorMultiplier}</dd>
             </div>
             <div>
-              <dt className="text-xs text-zinc-500">Term discounts (12 / 24 / 36 months)</dt>
+              <dt className="text-xs text-zinc-400">Term discounts (12 / 24 / 36 months)</dt>
               <dd className="text-zinc-100">
                 {pct(live.termDiscounts["12"])}% / {pct(live.termDiscounts["24"])}% / {pct(live.termDiscounts["36"])}%
               </dd>
             </div>
             {(["patrol", "video", "portal"] as const).map((addon) => (
               <div key={addon}>
-                <dt className="text-xs text-zinc-500">{live.addons[addon].label}</dt>
+                <dt className="text-xs text-zinc-400">{live.addons[addon].label}</dt>
                 <dd className="text-zinc-100">{formatCentsExact(live.addons[addon].monthlyCents)} a month</dd>
               </div>
             ))}
             <div>
-              <dt className="text-xs text-zinc-500">Extra discount needing a manager</dt>
+              <dt className="text-xs text-zinc-400">Extra discount needing a manager</dt>
               <dd className="text-zinc-100">above {pct(live.maxManualDiscount)}%</dd>
             </div>
           </dl>
@@ -169,7 +169,7 @@ export function AdminPricingPage() {
             <li key={version.id} className="flex flex-wrap items-center gap-3 py-2">
               <span className="text-zinc-100">From {version.effectiveFrom}</span>
               {version.live && <Pill tone="green">Live</Pill>}
-              <span className="text-xs text-zinc-500">
+              <span className="text-xs text-zinc-400">
                 {formatCentsExact(version.hourlyRateCents.unarmed)} unarmed · {version.createdBy ?? "seed"}
               </span>
             </li>

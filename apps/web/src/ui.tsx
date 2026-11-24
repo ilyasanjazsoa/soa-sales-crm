@@ -1,10 +1,10 @@
 import { CircleAlert, Loader, RefreshCw, type LucideIcon } from "lucide-react";
-import { useEffect, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 /* Shared pieces in the demo's style: dark zinc, emerald = good, amber = pending, blue = AI, red = error. */
 
 export const inputClass =
-  "w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-blue-500";
+  "w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-400 outline-none focus:border-blue-500";
 
 export function Panel(props: {
   title?: string;
@@ -30,7 +30,7 @@ export function Panel(props: {
 
 const BUTTON_KINDS = {
   default: "border border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500",
-  primary: "bg-emerald-600 text-white hover:bg-emerald-500",
+  primary: "bg-emerald-700 text-white hover:bg-emerald-700",
   danger: "bg-red-600 text-white hover:bg-red-500",
   ghost: "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
   blue: "bg-blue-600 text-white hover:bg-blue-500",
@@ -93,7 +93,7 @@ export function Pill({ tone = "zinc", children }: { tone?: keyof typeof PILL_TON
 
 export function Empty({ children }: { children: ReactNode }) {
   return (
-    <p className="rounded-lg border border-dashed border-zinc-800 px-4 py-6 text-center text-sm text-zinc-500">
+    <p className="rounded-lg border border-dashed border-zinc-800 px-4 py-6 text-center text-sm text-zinc-400">
       {children}
     </p>
   );
@@ -131,23 +131,50 @@ export function Field({ label, children, hint }: { label: string; children: Reac
     <label className="block space-y-1">
       <span className="block text-xs text-zinc-400">{label}</span>
       {children}
-      {hint !== undefined && <span className="block text-xs text-zinc-600">{hint}</span>}
+      {hint !== undefined && <span className="block text-xs text-zinc-400">{hint}</span>}
     </label>
   );
 }
 
 export function Modal(props: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   const { title, onClose, children, wide = false } = props;
-  // Escape closes the dialog wherever focus is.
+  const dialog = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  // Focus moves into the dialog and returns to where it was on close; Tab stays inside; Escape closes it.
   useEffect(() => {
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusable = () =>
+      Array.from(
+        dialog.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+    const first = focusable().find((element) => element.getAttribute("aria-label") !== "Close") ?? focusable()[0];
+    if (dialog.current !== null && !dialog.current.contains(document.activeElement)) first?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        close.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const [head, tail] = [items[0], items[items.length - 1]];
+      if (event.shiftKey && document.activeElement === head) {
+        event.preventDefault();
+        tail?.focus();
+      } else if (!event.shiftKey && document.activeElement === tail) {
+        event.preventDefault();
+        head?.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
+      before?.focus();
     };
-  }, [onClose]);
+  }, []);
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 sm:p-8"
@@ -156,6 +183,7 @@ export function Modal(props: { title: string; onClose: () => void; children: Rea
       }}
     >
       <div
+        ref={dialog}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -193,7 +221,7 @@ export function Stat({
     <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
       <p className="text-xs text-zinc-400">{label}</p>
       <p className={`mt-1 text-2xl font-semibold ${tone}`}>{value}</p>
-      {sub !== undefined && <p className="mt-1 text-xs text-zinc-500">{sub}</p>}
+      {sub !== undefined && <p className="mt-1 text-xs text-zinc-400">{sub}</p>}
     </div>
   );
 }

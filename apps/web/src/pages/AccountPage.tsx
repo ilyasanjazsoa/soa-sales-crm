@@ -116,7 +116,7 @@ function Timeline({ accountId, canEdit }: { accountId: string; canEdit: boolean 
             <li key={item.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
               {item.subject !== null && <p className="text-sm text-zinc-200">{item.subject}</p>}
               {item.body !== null && <p className="whitespace-pre-wrap text-sm text-zinc-300">{item.body}</p>}
-              <p className="text-xs text-zinc-600">
+              <p className="text-xs text-zinc-400">
                 {item.user?.name ?? "System"} · {ago(item.occurredAt)}
               </p>
             </li>
@@ -186,7 +186,7 @@ function ContactsPanel({ account }: { account: Account }) {
                 {contact.emailStatus !== "ok" && <Pill tone="red">{contact.emailStatus}</Pill>}
                 {contact.doNotCall && <Pill tone="red">Do not call</Pill>}
               </p>
-              {contact.title !== null && <p className="text-xs text-zinc-500">{contact.title}</p>}
+              {contact.title !== null && <p className="text-xs text-zinc-400">{contact.title}</p>}
               {contact.email !== null && <p className="truncate text-xs text-zinc-400">{contact.email}</p>}
               {contact.phone !== null && (
                 <p className="text-xs text-zinc-400">
@@ -194,9 +194,9 @@ function ContactsPanel({ account }: { account: Account }) {
                   {contact.phoneType === "unknown" ? "" : ` · ${contact.phoneType}`}
                 </p>
               )}
-              {contact.contactPref !== null && <p className="text-xs text-zinc-500">{contact.contactPref}</p>}
+              {contact.contactPref !== null && <p className="text-xs text-zinc-400">{contact.contactPref}</p>}
               {account.canEdit && (
-                <div className="mt-1 flex flex-wrap gap-3 text-xs text-zinc-500">
+                <div className="mt-1 flex flex-wrap gap-3 text-xs text-zinc-400">
                   <label className="flex items-center gap-1.5">
                     <input
                       type="checkbox"
@@ -312,7 +312,7 @@ function TasksPanel({ accountId, canEdit }: { accountId: string; canEdit: boolea
       ) : tasks.isError ? (
         <ErrorState error={tasks.error} onRetry={() => void tasks.refetch()} />
       ) : tasks.data.items.length === 0 ? (
-        <p className="text-xs text-zinc-600">No open tasks.</p>
+        <p className="text-xs text-zinc-400">No open tasks.</p>
       ) : (
         <ul className="space-y-2">
           {tasks.data.items.map((task) => (
@@ -457,7 +457,7 @@ export function AccountPage() {
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-        <Link to="/prospects" className="mb-2 flex w-fit items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">
+        <Link to="/prospects" className="mb-2 flex w-fit items-center gap-1 text-xs text-zinc-400 hover:text-zinc-300">
           <ArrowLeft size={12} aria-hidden="true" />
           Prospects
         </Link>
@@ -591,7 +591,7 @@ export function AccountPage() {
           ) : (
             <Panel title={current?.label ?? ""} icon={current?.icon}>
               <p className="text-sm text-zinc-300">{current?.what}</p>
-              <p className="mt-1 text-xs text-zinc-500">Arrives in milestone {current?.milestone}.</p>
+              <p className="mt-1 text-xs text-zinc-400">Arrives in milestone {current?.milestone}.</p>
             </Panel>
           )}
         </div>
@@ -601,20 +601,20 @@ export function AccountPage() {
           <Panel title="Property" icon={Building}>
             <dl className="space-y-2 text-xs">
               <div>
-                <dt className="text-zinc-500">Current security</dt>
+                <dt className="text-zinc-400">Current security</dt>
                 <dd className="text-zinc-200">{a.currentProvider ?? "Unknown"}</dd>
               </div>
               <div>
-                <dt className="text-zinc-500">Timing</dt>
+                <dt className="text-zinc-400">Timing</dt>
                 <dd className="text-zinc-200">{a.contractTiming ?? a.contractEndDate ?? "Unknown"}</dd>
               </div>
               <div>
-                <dt className="text-zinc-500">Fit reasons</dt>
+                <dt className="text-zinc-400">Fit reasons</dt>
                 <dd className="text-zinc-200">{a.fitReasons.join(" · ") || "None yet"}</dd>
               </div>
               {a.website !== null && (
                 <div>
-                  <dt className="text-zinc-500">Website</dt>
+                  <dt className="text-zinc-400">Website</dt>
                   <dd className="truncate text-zinc-200">{a.website}</dd>
                 </div>
               )}

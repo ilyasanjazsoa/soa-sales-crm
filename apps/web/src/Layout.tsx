@@ -65,7 +65,7 @@ export function Layout() {
         <div className="mx-auto flex max-w-[1400px] items-center gap-3 px-4 py-3">
           <Shield size={20} className="text-emerald-400" aria-hidden="true" />
           <span className="font-semibold">
-            Security Of America <span className="hidden font-normal text-zinc-500 sm:inline">· Sales CRM</span>
+            Security Of America <span className="hidden font-normal text-zinc-400 sm:inline">· Sales CRM</span>
           </span>
           <span className="ml-auto hidden text-sm text-zinc-400 sm:block">
             {user.name}, {user.title}

@@ -138,7 +138,7 @@ export function CalendarPage() {
                       })}
                     </h3>
                     {items.length === 0 ? (
-                      <p className="text-xs text-zinc-600">Free</p>
+                      <p className="text-xs text-zinc-400">Free</p>
                     ) : (
                       <ul className="space-y-1.5">
                         {items.map((item, index) =>
@@ -163,7 +163,7 @@ export function CalendarPage() {
                                 <Pill tone={STATUS_TONE[item.meeting.status]}>
                                   {item.meeting.status.replace("_", " ")}
                                 </Pill>
-                                <span className="text-zinc-500">{MEETING_KIND_LABELS[item.meeting.kind]}</span>
+                                <span className="text-zinc-400">{MEETING_KIND_LABELS[item.meeting.kind]}</span>
                               </p>
                             </li>
                           ) : (

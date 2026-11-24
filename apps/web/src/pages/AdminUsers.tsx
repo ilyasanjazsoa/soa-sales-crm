@@ -100,7 +100,7 @@ function UserRow({ user, isSelf }: { user: AdminUser; isSelf: boolean }) {
     <tr className="border-t border-zinc-800 align-top">
       <td className="px-4 py-2">
         <span className="block text-zinc-100">{user.name}</span>
-        <span className="block text-xs text-zinc-500">{user.email}</span>
+        <span className="block text-xs text-zinc-400">{user.email}</span>
         {update.isError && <span className="mt-1 block text-xs text-red-400">{update.error.message}</span>}
       </td>
       <td className="px-2 py-2">
@@ -165,7 +165,7 @@ export function AdminUsersPage() {
   return (
     <div className="space-y-4">
       <Panel title="Add a user" icon={UserPlus}>
-        <p className="mb-3 text-xs text-zinc-500">
+        <p className="mb-3 text-xs text-zinc-400">
           People must be added here before they can sign in. Deactivating someone requires reassigning their accounts
           first.
         </p>
@@ -187,7 +187,7 @@ export function AdminUsersPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-left text-sm">
-              <thead className="text-xs text-zinc-500">
+              <thead className="text-xs text-zinc-400">
                 <tr>
                   <th className="px-4 py-2 font-medium">Name</th>
                   <th className="px-2 py-2 font-medium">Role</th>

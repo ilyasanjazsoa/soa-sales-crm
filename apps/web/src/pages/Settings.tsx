@@ -114,7 +114,7 @@ export function SettingsPage() {
             <Pill tone="zinc">Not connected</Pill>
           )}
         </div>
-        <p className="mt-3 text-xs text-zinc-500">
+        <p className="mt-3 text-xs text-zinc-400">
           The CRM sends email from your own mailbox only when you click Send, and reads only replies to emails it sent.
         </p>
         <a

@@ -205,7 +205,7 @@ function Builder({ account, dealId }: { account: Account; dealId: string }) {
           </div>
         </div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 lg:col-span-2" aria-live="polite">
-          <p className="text-xs text-zinc-500">Price from the pricing engine</p>
+          <p className="text-xs text-zinc-400">Price from the pricing engine</p>
           {quote.isError ? (
             <ErrorState error={quote.error} />
           ) : quote.data === undefined ? (
@@ -281,7 +281,7 @@ function ProposalRow({ proposal, accountId }: { proposal: Proposal; accountId: s
           year
         </span>
         {proposal.viewCount > 0 && (
-          <span className="text-xs text-zinc-500">
+          <span className="text-xs text-zinc-400">
             Opened {proposal.viewCount} time{proposal.viewCount === 1 ? "" : "s"}
             {proposal.lastViewedAt === null ? "" : `, last ${new Date(proposal.lastViewedAt).toLocaleString()}`}
           </span>
@@ -479,7 +479,7 @@ export function ContractTab({ account }: { account: Account }) {
               >
                 Send contract for signature
               </Btn>
-              <p className="w-full text-xs text-zinc-500">
+              <p className="w-full text-xs text-zinc-400">
                 Version {sentProposal.version}: {formatCentsExact(sentProposal.pricing.monthlyCents)} a month. Your
                 contact signs first, then the company&apos;s signer.
               </p>
@@ -503,7 +503,7 @@ export function ContractTab({ account }: { account: Account }) {
                   <Pill tone={CONTRACT_TONE[contract.status]}>{contract.status}</Pill>
                   <span className="text-sm text-zinc-200">{contract.signer?.name ?? "Signer removed"}</span>
                   {contract.viewCount > 0 && (
-                    <span className="text-xs text-zinc-500">Viewed {contract.viewCount}×</span>
+                    <span className="text-xs text-zinc-400">Viewed {contract.viewCount}×</span>
                   )}
                   {contract.signedAt !== null && (
                     <span className="flex items-center gap-1 text-xs text-emerald-300">

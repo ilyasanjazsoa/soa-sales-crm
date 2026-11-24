@@ -29,7 +29,7 @@ function Lines({ text }: { text: string }) {
       {text.split("\n").map((line, index) =>
         line.startsWith("- ") ? (
           <p key={index} className="flex gap-2">
-            <span className="text-zinc-600">•</span>
+            <span className="text-zinc-400">•</span>
             <span>{line.slice(2)}</span>
           </p>
         ) : (
@@ -64,14 +64,14 @@ function SourceItem({ source, index }: { source: ResearchSource; index: number }
           {index + 1}
         </span>
         {source.kind === "website" ? (
-          <Globe size={14} className="text-zinc-500" />
+          <Globe size={14} className="text-zinc-400" />
         ) : (
-          <FileText size={14} className="text-zinc-500" />
+          <FileText size={14} className="text-zinc-400" />
         )}
         <span className="min-w-0 truncate">{source.title ?? source.kind}</span>
-        <span className="ml-auto shrink-0 text-xs text-zinc-600">{ago(source.fetchedAt)}</span>
+        <span className="ml-auto shrink-0 text-xs text-zinc-400">{ago(source.fetchedAt)}</span>
       </p>
-      {source.url !== null && <p className="mt-1 truncate text-xs text-zinc-500">{source.url}</p>}
+      {source.url !== null && <p className="mt-1 truncate text-xs text-zinc-400">{source.url}</p>}
       <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-400">
         {open || !long ? source.contentText : `${source.contentText.slice(0, 400)}…`}
       </p>
@@ -193,7 +193,7 @@ export function ResearchTab({ account }: { account: Account }) {
           )
         }
       >
-        <p className="mb-3 text-xs text-zinc-500">
+        <p className="mb-3 text-xs text-zinc-400">
           The AI may only use what's listed here. Each fact in the brief points back to its source.
         </p>
         {account.website === null && account.canEdit && (
@@ -298,7 +298,7 @@ export function ResearchTab({ account }: { account: Account }) {
                     onClick={() => {
                       remove.mutate(signal.id);
                     }}
-                    className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+                    className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -415,7 +415,7 @@ export function ResearchTab({ account }: { account: Account }) {
           <Empty>No brief yet.</Empty>
         ) : (
           <div className="space-y-4">
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-400">
               Version {current.version} · {ago(current.createdAt)} · by {current.createdBy.name}
             </p>
             {current.sections.map((section) => (
@@ -439,7 +439,7 @@ export function ResearchTab({ account }: { account: Account }) {
                 </h3>
                 <div className="mt-1">
                   {section.text === NOT_ENOUGH_INFORMATION ? (
-                    <p className="text-sm text-zinc-500">{section.text} Add a source to fill this in.</p>
+                    <p className="text-sm text-zinc-400">{section.text} Add a source to fill this in.</p>
                   ) : (
                     <Lines text={section.text} />
                   )}

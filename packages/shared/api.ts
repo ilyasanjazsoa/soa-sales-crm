@@ -122,3 +122,20 @@ export const UpdateUserRequest = z
 export type UpdateUserRequest = z.infer<typeof UpdateUserRequest>;
 
 export const IdParam = z.object({ id: z.uuid() });
+
+/** Admin → Audit log (GET /api/admin/audit). */
+export const AuditPage = z.object({
+  items: z.array(
+    z.object({
+      id: z.number().int(),
+      userId: z.string().nullable(),
+      action: z.string(),
+      entityType: z.string().nullable(),
+      entityId: z.string().nullable(),
+      meta: z.record(z.string(), z.unknown()),
+      createdAt: z.iso.datetime({ offset: true }),
+    }),
+  ),
+  nextCursor: z.string().nullable(),
+});
+export type AuditPage = z.infer<typeof AuditPage>;

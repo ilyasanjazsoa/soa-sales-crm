@@ -171,7 +171,7 @@ function Editor(props: { draft: Draft; accountId: string; sends: { used: number;
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-5">
       <div className="space-y-2 lg:col-span-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
           {saved.byAi && (
             <Pill tone="blue">
               <Sparkles size={11} aria-hidden="true" />
@@ -227,7 +227,7 @@ function Editor(props: { draft: Draft; accountId: string; sends: { used: number;
         />
         {saved.footer !== null && (
           <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-950/50 p-3">
-            <p className="mb-1 flex items-center gap-1 text-xs text-zinc-500">
+            <p className="mb-1 flex items-center gap-1 text-xs text-zinc-400">
               <Lock size={11} aria-hidden="true" />
               Added automatically. Can&apos;t be removed.
             </p>
@@ -280,7 +280,7 @@ function Editor(props: { draft: Draft; accountId: string; sends: { used: number;
                 }
               />
             )}
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-400">
               Goes from your own mailbox, one message per click. Nothing is ever sent automatically.
             </p>
           </div>
@@ -401,7 +401,7 @@ function Thread({ accountId }: { accountId: string }) {
                 email.direction === "in" ? "border-emerald-900 bg-emerald-950/20" : "border-zinc-800 bg-zinc-950/60"
               }`}
             >
-              <p className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+              <p className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
                 {statusPill(email)}
                 {email.classification !== null && (
                   <Pill tone={CLASS_TONE[email.classification]}>
@@ -563,7 +563,7 @@ export function OutreachTab({ account }: { account: Account }) {
             Write it myself
           </Btn>
           {contact?.contactPref !== null && contact?.contactPref !== undefined && (
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-zinc-400">
               {contact.firstName}: {contact.contactPref}
             </span>
           )}
@@ -580,7 +580,7 @@ export function OutreachTab({ account }: { account: Account }) {
         ) : current === undefined ? null : (
           <>
             {drafts.data.items.length > 1 && (
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
                 <span>Unsent drafts:</span>
                 {drafts.data.items.map((item) => (
                   <button

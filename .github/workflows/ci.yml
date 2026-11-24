@@ -77,6 +77,7 @@ jobs:
       COMPANY_POSTAL_ADDRESS: "100 Example Plaza, Dallas, TX 75201"
       COMPANY_SIGNER_NAME: "Jordan Hale"
       COMPANY_SIGNER_EMAIL: "jordan.hale@soa.example"
+      JOB_TICK_SECONDS: "3"
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4

@@ -42,7 +42,7 @@ export function LoginPage() {
           <LogIn size={16} aria-hidden="true" />
           Sign in with Microsoft
         </a>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-400">
           Uses your company account and its two-step verification. The CRM never sees or stores your password.
         </p>
       </div>

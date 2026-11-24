@@ -97,7 +97,7 @@ export function AdminSuppressionsPage() {
           />
         }
       >
-        <p className="mb-3 text-xs text-zinc-500">
+        <p className="mb-3 text-xs text-zinc-400">
           No rep can email these addresses. Unsubscribes and bounces are added automatically.
         </p>
         {list.isPending ? (
@@ -112,8 +112,8 @@ export function AdminSuppressionsPage() {
               <li key={item.email} className="flex flex-wrap items-center gap-3 py-2">
                 <span className="min-w-0 flex-1 truncate text-sm text-zinc-100">{item.email}</span>
                 <Pill tone={REASON_TONE[item.reason]}>{item.reason}</Pill>
-                {item.note !== null && <span className="text-xs text-zinc-500">{item.note}</span>}
-                <span className="text-xs text-zinc-500">{new Date(item.createdAt).toLocaleDateString()}</span>
+                {item.note !== null && <span className="text-xs text-zinc-400">{item.note}</span>}
+                <span className="text-xs text-zinc-400">{new Date(item.createdAt).toLocaleDateString()}</span>
                 {canChange && (
                   <Btn
                     small

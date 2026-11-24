@@ -159,7 +159,7 @@ export function PipelinePage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-400">
           Drag a card to move its stage. “Contract sent” and “Won” are set automatically by the e-signature system.
         </p>
         <div className="ml-auto flex gap-1" role="group" aria-label="View">
@@ -236,9 +236,9 @@ export function PipelinePage() {
                   <div className="mb-2 px-1">
                     <p className="text-xs font-semibold text-zinc-200">
                       {STAGE_LABELS[stage]}{" "}
-                      <span className="font-normal text-zinc-500">· {STAGE_PROBABILITY_BP[stage] / 100}%</span>
+                      <span className="font-normal text-zinc-400">· {STAGE_PROBABILITY_BP[stage] / 100}%</span>
                     </p>
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-zinc-400">
                       {column.length} · {formatMoneyShort(column.reduce((sum, deal) => sum + deal.annualValueCents, 0))}
                     </p>
                   </div>
@@ -260,7 +260,7 @@ export function PipelinePage() {
                       >
                         <p className="text-xs font-medium text-zinc-100">{deal.accountName}</p>
                         <p className="mt-1 text-xs text-zinc-400">{formatMoneyShort(deal.annualValueCents)} a year</p>
-                        <p className="mt-1 flex items-center justify-between text-xs text-zinc-600">
+                        <p className="mt-1 flex items-center justify-between text-xs text-zinc-400">
                           <span>{daysSince(deal.stageChangedAt)}d in stage</span>
                           <span title={deal.owner.name} className="rounded-full bg-zinc-800 px-1.5 text-zinc-300">
                             {initials(deal.owner.name)}
@@ -278,7 +278,7 @@ export function PipelinePage() {
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/60">
           <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="text-xs text-zinc-500">
+            <thead className="text-xs text-zinc-400">
               <tr>
                 <th className="px-4 py-2 font-medium">Account</th>
                 <th className="px-2 py-2 font-medium">Stage</th>
@@ -319,7 +319,7 @@ export function PipelinePage() {
                         ))}
                       </select>
                     ) : (
-                      <span className="text-xs text-zinc-600">Closed</span>
+                      <span className="text-xs text-zinc-400">Closed</span>
                     )}
                   </td>
                 </tr>

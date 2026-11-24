@@ -14,6 +14,13 @@ export default defineConfig({
     command: "pnpm dev",
     url: "http://localhost:5173/readyz",
     reuseExistingServer: !process.env.CI,
+    // Fictional company settings and fast job ticks for the journeys (process env wins over the generated .env).
+    env: {
+      COMPANY_POSTAL_ADDRESS: "100 Example Plaza, Dallas, TX 75201",
+      COMPANY_SIGNER_NAME: "Jordan Hale",
+      COMPANY_SIGNER_EMAIL: "jordan.hale@soa.example",
+      JOB_TICK_SECONDS: "3",
+    },
     timeout: 120_000,
   },
 });

@@ -1,19 +1,7 @@
 import type { Database } from "@soa/db";
+import type { AuditPage } from "@soa/shared";
 import { auditRepo } from "../repos/audit";
 import type { UserScope } from "../repos/scope";
-
-export interface AuditPage {
-  items: {
-    id: number;
-    userId: string | null;
-    action: string;
-    entityType: string | null;
-    entityId: string | null;
-    meta: Record<string, unknown>;
-    createdAt: string;
-  }[];
-  nextCursor: string | null;
-}
 
 export function createAuditService({ db }: { db: Database }) {
   return {

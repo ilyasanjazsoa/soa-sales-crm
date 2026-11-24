@@ -9,11 +9,12 @@ import { AccountPage } from "./pages/AccountPage";
 import { AskPage } from "./pages/Ask";
 import { TodayPage } from "./pages/Today";
 import { CalendarPage } from "./pages/CalendarPage";
+import { AdminAuditPage } from "./pages/AdminAudit";
+import { AdminExportPage } from "./pages/AdminExport";
 import { AdminPricingPage } from "./pages/AdminPricing";
 import { AdminReferencesPage } from "./pages/AdminReferences";
 import { AdminSuppressionsPage } from "./pages/AdminSuppressions";
 import { AdminUsersPage } from "./pages/AdminUsers";
-import { ComingPage } from "./pages/Coming";
 import { LoginPage } from "./pages/Login";
 import { PipelinePage } from "./pages/Pipeline";
 import { ProspectsPage } from "./pages/Prospects";
@@ -59,16 +60,8 @@ const router = createBrowserRouter([
           { path: "references", element: <AdminReferencesPage /> },
           { path: "suppressions", element: <AdminSuppressionsPage /> },
 
-          {
-            path: "audit",
-            element: (
-              <ComingPage title="Audit log" milestone={8} what="Every sign-in, send, stage change and admin change." />
-            ),
-          },
-          {
-            path: "export",
-            element: <ComingPage title="Export" milestone={8} what="Download accounts and deals as CSV." />,
-          },
+          { path: "audit", element: <AdminAuditPage /> },
+          { path: "export", element: <AdminExportPage /> },
         ],
       },
       { path: "*", element: <Navigate to="/" replace /> },
