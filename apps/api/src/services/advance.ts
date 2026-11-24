@@ -14,8 +14,13 @@ export async function advanceDeal(
   to: DealStage,
   trigger: string,
   now: Date,
+  /** The deal the trigger belongs to (a proposal's or contract's), when known; otherwise the account's current one. */
+  dealId?: string,
 ): Promise<boolean> {
-  const deal = await dealsRepo(tx).currentForAccount(scope, accountId);
+  const deal =
+    dealId === undefined
+      ? await dealsRepo(tx).currentForAccount(scope, accountId)
+      : await dealsRepo(tx).get(scope, dealId);
   const next = deal === undefined ? null : automaticAdvance(deal.deal, to);
   if (deal === undefined || next === null) return false;
   const moved = await dealsRepo(tx).update(scope, deal.deal.id, {

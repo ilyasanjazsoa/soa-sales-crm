@@ -35,6 +35,7 @@ export function verifyDropboxSignEvent(json: string, key: string): ESignEvent | 
   if (!safeEqual(expected, event.event_hash.toLowerCase())) return null;
   return {
     eventId: `${event.event_type}:${event.event_time}:${request?.signature_request_id ?? ""}`,
+    occurredAt: new Date(Number(event.event_time) * 1000),
     type: TYPES[event.event_type] ?? "other",
     envelopeId: request?.signature_request_id ?? "",
   };
@@ -97,6 +98,22 @@ export function createDropboxSignProvider(options: {
     async downloadSigned(envelopeId) {
       const response = await call(`/signature_request/files/${encodeURIComponent(envelopeId)}?file_type=pdf`);
       return Buffer.from(await response.arrayBuffer());
+    },
+    async status(envelopeId) {
+      const body = z
+        .object({
+          signature_request: z.object({
+            is_complete: z.boolean(),
+            is_declined: z.boolean().optional(),
+            signatures: z.array(z.object({ status_code: z.string() })).optional(),
+          }),
+        })
+        .parse(await (await call(`/signature_request/${encodeURIComponent(envelopeId)}`)).json());
+      const request = body.signature_request;
+      if (request.is_complete) return "complete";
+      if (request.is_declined === true) return "declined";
+      if (request.signatures?.some((signature) => signature.status_code === "cancelled") === true) return "canceled";
+      return "pending";
     },
     verifyWebhook: (json) => verifyDropboxSignEvent(json, options.webhookKey),
   };

@@ -51,6 +51,7 @@ export function proposalsRepo(db: Executor) {
         accountId: deals.accountId,
         accountName: accounts.name,
         dealOwner: deals.ownerUserId,
+        dealStatus: deals.status,
       })
       .from(proposals)
       .innerJoin(deals, eq(deals.id, proposals.dealId))
@@ -126,7 +127,7 @@ export function proposalsRepo(db: Executor) {
 export function contractsRepo(db: Executor) {
   const base = () =>
     db
-      .select({ contract: contracts, accountId: deals.accountId, accountName: accounts.name })
+      .select({ contract: contracts, accountId: deals.accountId, accountName: accounts.name, dealStatus: deals.status })
       .from(contracts)
       .innerJoin(deals, eq(deals.id, contracts.dealId))
       .innerJoin(accounts, eq(accounts.id, deals.accountId));
