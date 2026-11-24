@@ -145,7 +145,7 @@ function ReferenceRow({ reference }: { reference: ClientReference }) {
     <li className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm text-zinc-100">{reference.labelNamed}</p>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-400">
           Anonymized: “{reference.labelAnonymized}” ·{" "}
           {Object.entries(reference.stats)
             .map(([key, value]) => `${key} ${String(value)}`)
@@ -188,7 +188,7 @@ export function AdminReferencesPage() {
         <AddReference />
       </Panel>
       <Panel title="Client references used as proof points" icon={ShieldCheck}>
-        <p className="mb-3 text-xs text-zinc-500">
+        <p className="mb-3 text-xs text-zinc-400">
           Outreach may only name a client when permission is on. Otherwise it uses the anonymized wording, and the
           compliance check blocks the real name.
         </p>

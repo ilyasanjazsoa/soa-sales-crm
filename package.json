@@ -18,12 +18,15 @@
     "db:migrate": "pnpm --filter @soa/db db:migrate",
     "env:init": "node scripts/env-init.mjs",
     "db:seed": "pnpm --filter @soa/db db:seed",
-    "test:ai": "AI_LIVE=1 vitest run --project api apps/api/test/ai-fixtures.test.ts"
+    "test:ai": "AI_LIVE=1 vitest run --project api apps/api/test/ai-fixtures.test.ts",
+    "coverage:shared": "vitest run --project shared --coverage --coverage.include='packages/shared/{pricing,stages,fit,nba,slots}.ts' --coverage.thresholds.lines=95 --coverage.reporter=text-summary"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.1",
     "@eslint/js": "^9.36.0",
     "@playwright/test": "^1.55.0",
     "@types/node": "^22.18.0",
+    "@vitest/coverage-v8": "^4.1.12",
     "eslint": "^9.36.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^5.2.0",
@@ -31,6 +34,6 @@
     "prettier": "^3.6.2",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.44.0",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.12"
   }
 }

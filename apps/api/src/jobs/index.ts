@@ -14,3 +14,5 @@ export { morningPrepDue, queueMorningPrep, runCalendarSync, runPrepGenerate } fr
 export { createCalendarProvider, createMapsProvider, createTokenRefresher } from "../providers/factories";
 export { createDriveTimes } from "../providers/maps/cache";
 export { runProposalRender } from "../services/proposals";
+export { runMaintenance } from "../services/maintenance";
+export { createRdsBackupChecker, fakeBackupChecker } from "../providers/backups";

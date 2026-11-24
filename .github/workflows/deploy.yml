@@ -1,0 +1,98 @@
+name: Deploy
+
+# Merges to main deploy to staging; production is a manual run that needs the "production" environment's approval
+# (§16). AWS access is through GitHub OIDC (no stored keys). Each run: build the image, push it, run migrations as
+# a one-off task, then roll the api and worker to the new image. Migrations must be backward compatible with the
+# version still running.
+on:
+  # Staging: after CI has passed on main.
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Where to deploy
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Only main is ever deployed: a manual run from another branch stops here (and the AWS role trusts main only).
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    env:
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      CLUSTER: soa-crm-${{ github.event.inputs.environment || 'staging' }}
+      REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push the image
+        run: |
+          docker build -t "$REPOSITORY:$TAG" .
+          docker push "$REPOSITORY:$TAG"
+
+      - name: Register task definitions for the new image
+        id: taskdefs
+        run: |
+          for role in api worker migrate; do
+            family="$CLUSTER-$role"
+            aws ecs describe-task-definition --task-definition "$family" --query taskDefinition > current.json
+            jq --arg image "$REPOSITORY:$TAG" '
+              .containerDefinitions[0].image = $image
+              | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+            ' current.json > next.json
+            arn=$(aws ecs register-task-definition --cli-input-json file://next.json --query taskDefinition.taskDefinitionArn --output text)
+            echo "$role=$arn" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Run migrations (one-off task, before the new version starts)
+        run: |
+          network=$(aws ecs describe-services --cluster "$CLUSTER" --services api \
+            --query 'services[0].networkConfiguration' --output json)
+          task=$(aws ecs run-task --cluster "$CLUSTER" --launch-type FARGATE \
+            --task-definition "${{ steps.taskdefs.outputs.migrate }}" \
+            --network-configuration "$network" --query 'tasks[0].taskArn' --output text)
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task"
+          code=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task" --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migration exit code: $code"
+          test "$code" = "0"
+
+      - name: Roll the services
+        run: |
+          aws ecs update-service --cluster "$CLUSTER" --service api --task-definition "${{ steps.taskdefs.outputs.api }}" > /dev/null
+          aws ecs update-service --cluster "$CLUSTER" --service worker --task-definition "${{ steps.taskdefs.outputs.worker }}" > /dev/null
+          aws ecs wait services-stable --cluster "$CLUSTER" --services api worker
+
+      - name: Smoke check
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://${{ vars.DOMAIN_NAME }}/healthz")
+          echo "healthz: $code"
+          test "$code" = "200"

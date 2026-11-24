@@ -37,7 +37,7 @@ function AskBox({ autoFocus = false, onNavigate }: { autoFocus?: boolean; onNavi
           ref={input}
           aria-label="Ask a question"
           placeholder="Ask about your deals, meetings, replies or accounts"
-          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-blue-500"
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-400 outline-none focus:border-blue-500"
           value={question}
           maxLength={500}
           onChange={(event) => {
@@ -73,12 +73,12 @@ function AskBox({ autoFocus = false, onNavigate }: { autoFocus?: boolean; onNavi
                   <Link to={item.link} onClick={onNavigate} className="text-sm text-blue-300 hover:underline">
                     {item.label}
                   </Link>
-                  {item.sub !== "" && <p className="text-xs text-zinc-500">{item.sub}</p>}
+                  {item.sub !== "" && <p className="text-xs text-zinc-400">{item.sub}</p>}
                 </li>
               ))}
             </ul>
           )}
-          <p className="text-[11px] text-zinc-500">
+          <p className="text-[11px] text-zinc-400">
             Answered from CRM data you can see. The AI can make mistakes; check before acting.
           </p>
         </div>
@@ -131,7 +131,7 @@ export function AskPalette() {
           setOpen(false);
         }}
       />
-      <p className="mt-3 text-xs text-zinc-500">
+      <p className="mt-3 text-xs text-zinc-400">
         <button
           type="button"
           className="underline"

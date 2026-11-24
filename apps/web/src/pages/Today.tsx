@@ -52,7 +52,7 @@ export function TodayPage() {
                     </Pill>
                     <p className="min-w-0 flex-1 text-sm text-zinc-200">{action.text}</p>
                     {action.valueCents > 0 && (
-                      <span className="text-xs text-zinc-500">{formatMoneyShort(action.valueCents)}</span>
+                      <span className="text-xs text-zinc-400">{formatMoneyShort(action.valueCents)}</span>
                     )}
                     <Link
                       to={action.button.href}

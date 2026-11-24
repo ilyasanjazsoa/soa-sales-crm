@@ -23,4 +23,7 @@ const shutdown = (signal: string) => {
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
 
-await app.listen({ port: config.PORT, host: config.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1" });
+await app.listen({
+  port: config.PORT,
+  host: config.HOST ?? (config.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
+});

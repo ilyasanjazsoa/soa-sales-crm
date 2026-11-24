@@ -11,6 +11,7 @@ export const JOBS = {
   calendarSync: "calendar.sync",
   prepGenerate: "prep.generate",
   proposalRender: "proposal.render",
+  maintenanceNightly: "maintenance.nightly",
 } as const;
 export type JobName = (typeof JOBS)[keyof typeof JOBS];
 
@@ -23,6 +24,7 @@ export interface JobPayloads {
   "calendar.sync": { userId: string };
   "prep.generate": { meetingId: string };
   "proposal.render": { proposalId: string };
+  "maintenance.nightly": { day: string };
 }
 
 export interface JobQueue {
@@ -42,10 +44,11 @@ export const JOB_OPTIONS: Record<JobName, { retryLimit: number; retryBackoff?: b
   "calendar.sync": { retryLimit: 0 },
   "prep.generate": { retryLimit: 1 },
   "proposal.render": { retryLimit: 2 },
+  "maintenance.nightly": { retryLimit: 1 },
 };
 
 /** Syncs are per user and disposable: "stately" keeps at most one queued and one running job per user. */
-const SYNC_QUEUES = new Set<string>(["mail.sync", "calendar.sync", "prep.generate"]);
+const SYNC_QUEUES = new Set<string>(["mail.sync", "calendar.sync", "prep.generate", "maintenance.nightly"]);
 
 /** The api only sends; the worker passes `supervise: true` so jobs whose worker died are expired and retried. */
 export async function createPgBossQueue(
@@ -73,7 +76,9 @@ export async function createPgBossQueue(
           ? (data as { userId: string }).userId
           : name === "prep.generate"
             ? (data as { meetingId: string }).meetingId
-            : undefined;
+            : name === "maintenance.nightly"
+              ? (data as { day: string }).day
+              : undefined;
       const singleton = key === undefined ? {} : { singletonKey: key };
       await boss.send(name, data, { ...JOB_OPTIONS[name], ...singleton });
     },

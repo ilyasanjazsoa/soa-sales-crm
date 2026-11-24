@@ -204,7 +204,7 @@ export function MeetingsTab({ account }: { account: Account }) {
             Find best times
           </Btn>
         </div>
-        <p className="mt-2 text-xs text-zinc-500">
+        <p className="mt-2 text-xs text-zinc-400">
           Reads your calendar for the next two weeks and leaves room to drive between stops
           {primary?.contactPref != null ? `. ${primary.firstName}: ${primary.contactPref}` : ""}.
         </p>
@@ -258,7 +258,7 @@ export function MeetingsTab({ account }: { account: Account }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-sm font-medium text-zinc-100">{meeting.title}</p>
                   <Pill tone={STATUS_TONE[meeting.status]}>{meeting.status.replace("_", " ")}</Pill>
-                  <span className="text-xs text-zinc-500">
+                  <span className="text-xs text-zinc-400">
                     {day(meeting.startsAt)}, {time(meeting.startsAt)} ·{" "}
                     {meeting.locationText ?? MEETING_KIND_LABELS[meeting.kind]}
                   </span>

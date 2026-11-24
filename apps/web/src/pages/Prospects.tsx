@@ -240,7 +240,7 @@ function ImportWizard({ onClose }: { onClose: () => void }) {
             Prospect lists must come from a source you've licensed. Upload a CSV file of up to 10 MB, or try the sample.
           </p>
           <div className="flex flex-wrap gap-2">
-            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500">
               <Upload size={14} aria-hidden="true" />
               Choose CSV file
               <input
@@ -345,7 +345,7 @@ function SkippedList({ rows }: { rows: { row: number; name: string | null; reaso
     <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
       {rows.map((row) => (
         <li key={row.row} className="flex gap-2 rounded border border-zinc-800 px-2 py-1">
-          <span className="w-14 shrink-0 text-zinc-500">Row {row.row}</span>
+          <span className="w-14 shrink-0 text-zinc-400">Row {row.row}</span>
           <span className="flex-1 truncate text-zinc-300">{row.name ?? "(no name)"}</span>
           <span
             className={
@@ -373,7 +373,7 @@ function ResultRow({ item }: { item: AccountSummary }) {
         <Link to={`/accounts/${item.id}`} className="block font-medium text-zinc-100 hover:underline">
           {item.name}
         </Link>
-        <span className="block text-xs text-zinc-500">
+        <span className="block text-xs text-zinc-400">
           {item.propertyType}
           {item.city === null ? "" : ` · ${item.city}`}
           {item.ownerCompany === null ? "" : ` · ${item.ownerCompany}`}
@@ -387,13 +387,13 @@ function ResultRow({ item }: { item: AccountSummary }) {
           {item.fitReasons.length > 0 ? (
             item.fitReasons.map((reason) => <Pill key={reason}>{reason}</Pill>)
           ) : (
-            <span className="text-xs text-zinc-600">No signals yet</span>
+            <span className="text-xs text-zinc-400">No signals yet</span>
           )}
         </div>
       </td>
       <td className="px-2 py-3">
         {item.deal === null ? (
-          <span className="text-xs text-zinc-600">No deal</span>
+          <span className="text-xs text-zinc-400">No deal</span>
         ) : (
           <StagePill stage={item.deal.stage} status={item.deal.status} />
         )}
@@ -577,7 +577,7 @@ export function ProspectsPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="text-xs text-zinc-500">
+              <thead className="text-xs text-zinc-400">
                 <tr>
                   <th className="px-4 py-2 font-medium">Account</th>
                   <th className="px-2 py-2 font-medium">Fit</th>

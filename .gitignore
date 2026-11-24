@@ -14,3 +14,7 @@ secrets/
 *.tfstate
 *.tfstate.*
 .claude/worktrees/
+
+# Terraform / OpenTofu state (the provider lock file is committed)
+*.tfstate
+*.tfstate.*

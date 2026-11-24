@@ -48,7 +48,26 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - run: pnpm coverage:shared
       - run: pnpm --filter @soa/web build
+      - run: pnpm audit --audit-level=high
+
+  infra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: opentofu/setup-opentofu@v1
+      - run: tofu -chdir=infra fmt -check -recursive
+      - run: tofu -chdir=infra init -backend=false -input=false
+      - run: tofu -chdir=infra validate
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t soa-crm:ci .
 
   e2e:
     runs-on: ubuntu-latest
@@ -77,6 +96,7 @@ jobs:
       COMPANY_POSTAL_ADDRESS: "100 Example Plaza, Dallas, TX 75201"
       COMPANY_SIGNER_NAME: "Jordan Hale"
       COMPANY_SIGNER_EMAIL: "jordan.hale@soa.example"
+      JOB_TICK_SECONDS: "3"
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4

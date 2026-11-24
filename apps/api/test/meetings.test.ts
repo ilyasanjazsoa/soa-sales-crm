@@ -29,9 +29,11 @@ const as = (who: SignedIn = session) => ({ cookies: who.cookies, headers: who.he
 const NOW = new Date("2026-03-02T15:00:00Z");
 const clock = () => NOW;
 
-async function start(options: { mapsFail?: boolean; calendar?: typeof calendar.provider } = {}) {
+async function start(
+  options: { mapsFail?: boolean; calendar?: typeof calendar.provider; env?: Record<string, string> } = {},
+) {
   app = await testApp({
-    env: { TOKEN_ENC_KEY },
+    env: { TOKEN_ENC_KEY, ...options.env },
     clock,
     queue,
     aiAdapter: adapter,
@@ -391,5 +393,15 @@ describe("review fixes", () => {
       [meeting.id],
     );
     expect(audit.map((entry) => entry.action)).toEqual(["meeting.book", "meeting.move"]);
+  });
+});
+
+describe("security review fixes", () => {
+  it("staging (MAIL_ALLOWLIST) never invites an address outside the list", async () => {
+    await app.close();
+    await start({ env: { MAIL_ALLOWLIST: "tester@soa.example" } });
+    const [slot] = await findTimes("call");
+    const booked = BookedMeeting.parse((await book(slot?.start ?? "", "call")).json());
+    expect(booked.invited).toBe(false);
   });
 });
