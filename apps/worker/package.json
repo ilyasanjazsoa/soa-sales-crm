@@ -1,0 +1,19 @@
+{
+  "name": "@soa/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@soa/shared": "workspace:*",
+    "pg-boss": "^11.0.2",
+    "pino": "^9.11.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6"
+  }
+}

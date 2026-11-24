@@ -1,0 +1,12 @@
+node_modules
+dist
+coverage
+playwright-report
+test-results
+pnpm-lock.yaml
+packages/db/migrations
+# The kit's own files keep their original formatting.
+reference
+docs
+README.md
+CLAUDE.md

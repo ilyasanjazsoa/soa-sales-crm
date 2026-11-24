@@ -13,3 +13,4 @@ secrets/
 .terraform/
 *.tfstate
 *.tfstate.*
+.claude/worktrees/
