@@ -18,6 +18,7 @@ import {
   runResearchBrief,
   runResearchFetch,
   runMailSend,
+  runProposalRender,
   runMailSync,
   sweepStuckMail,
   syncableUsers,
@@ -162,6 +163,18 @@ await queue.boss.work<{ userId: string }>(JOBS.calendarSync, async (jobs) => {
   }
 });
 await handle(JOBS.prepGenerate, (data) => runPrepGenerate(meetingDeps, data as unknown as { meetingId: string }));
+await queue.boss.work<{ proposalId: string }>(JOBS.proposalRender, async (jobs) => {
+  for (const job of jobs) {
+    log.info({ job: JOBS.proposalRender, id: job.id }, "job started");
+    try {
+      await runProposalRender({ db: database.db, store, config, clock: systemClock }, job.data);
+      log.info({ job: JOBS.proposalRender, id: job.id }, "job done");
+    } catch (error) {
+      log.error({ job: JOBS.proposalRender, id: job.id, err: failure(error) }, "job failed");
+      throw error;
+    }
+  }
+});
 // Every 5 minutes: calendar.sync per connected user, and the 6 am prep refresh for today's meetings.
 const CALENDAR_EVERY_MS = 5 * 60 * 1000;
 const calendarTick = async () => {

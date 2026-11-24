@@ -7,6 +7,7 @@ import { Layout } from "./Layout";
 import { AdminPage } from "./pages/Admin";
 import { AccountPage } from "./pages/AccountPage";
 import { CalendarPage } from "./pages/CalendarPage";
+import { AdminPricingPage } from "./pages/AdminPricing";
 import { AdminReferencesPage } from "./pages/AdminReferences";
 import { AdminSuppressionsPage } from "./pages/AdminSuppressions";
 import { AdminUsersPage } from "./pages/AdminUsers";
@@ -70,12 +71,7 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <AdminIndex /> },
           { path: "users", element: <AdminUsersPage /> },
-          {
-            path: "pricing",
-            element: (
-              <ComingPage title="Pricing" milestone={6} what="Rates, add-ons and term discounts, with versions." />
-            ),
-          },
+          { path: "pricing", element: <AdminPricingPage /> },
           { path: "references", element: <AdminReferencesPage /> },
           { path: "suppressions", element: <AdminSuppressionsPage /> },
 

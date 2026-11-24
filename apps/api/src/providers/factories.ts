@@ -7,6 +7,9 @@ import type { TokenRefresher } from "../services/oauth-tokens";
 import { createFakeCalendarProvider } from "./calendar/fake";
 import { createGraphCalendarProvider } from "./calendar/graph";
 import type { CalendarProvider } from "./calendar/types";
+import { createDropboxSignProvider } from "./esign/dropbox-sign";
+import { createFakeESignProvider } from "./esign/fake";
+import type { ESignProvider } from "./esign/types";
 import { createFakeTokenRefresher, createMicrosoftTokenRefresher } from "./identity/refresh";
 import { createFakeMapsProvider } from "./maps/fake";
 import { createGoogleMapsProvider } from "./maps/google";
@@ -39,6 +42,28 @@ export function createCalendarProvider(config: Env): CalendarProvider {
   if (!config.FAKE_PROVIDERS) return createGraphCalendarProvider();
   const name = createHash("sha256").update(config.DATABASE_URL).digest("hex").slice(0, 12);
   return createFakeCalendarProvider({ file: join(tmpdir(), "soa-crm-fake-calendar", `${name}.json`) }).provider;
+}
+
+/** E-signature: Dropbox Sign (DECISIONS.md item C) or the fake. The fake's callbacks are signed like the real ones. */
+export function createESignProvider(config: Env): {
+  provider: ESignProvider;
+  fake?: ReturnType<typeof createFakeESignProvider>;
+} {
+  if (config.FAKE_PROVIDERS || config.ESIGN_PROVIDER === undefined) {
+    const key =
+      config.ESIGN_WEBHOOK_SECRET ?? createHash("sha256").update(`fake-esign:${config.SESSION_SECRET}`).digest("hex");
+    const fake = createFakeESignProvider({ webhookKey: key });
+    return { provider: fake.provider, fake };
+  }
+  const apiKey = config.ESIGN_API_KEY;
+  if (apiKey === undefined) throw new Error("ESIGN_API_KEY is required for ESIGN_PROVIDER=dropbox_sign");
+  return {
+    provider: createDropboxSignProvider({
+      apiKey,
+      webhookKey: config.ESIGN_WEBHOOK_SECRET ?? apiKey,
+      testMode: config.DEPLOY_ENV !== "production",
+    }),
+  };
 }
 
 export function createMapsProvider(config: Env): MapsProvider {

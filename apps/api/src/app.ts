@@ -23,10 +23,18 @@ import { registerOutreachRoutes, registerUnsubscribeRoutes } from "./routes/outr
 import { createOutreachService, createUnsubscribeService } from "./services/outreach";
 import { registerMeetingRoutes } from "./routes/meetings";
 import { createMeetingsService } from "./services/meetings";
-import { createCalendarProvider, createMapsProvider, createTokenRefresher } from "./providers/factories";
+import {
+  createCalendarProvider,
+  createESignProvider,
+  createMapsProvider,
+  createTokenRefresher,
+} from "./providers/factories";
 import { createDriveTimes } from "./providers/maps/cache";
 import type { CalendarProvider } from "./providers/calendar/types";
 import type { MapsProvider } from "./providers/maps/types";
+import type { ESignProvider } from "./providers/esign/types";
+import { registerProposalRoutes, registerPublicProposalRoutes } from "./routes/proposals";
+import { createProposalsService } from "./services/proposals";
 import { createAiClient } from "./providers/ai/client";
 import { createBedrockAdapter } from "./providers/ai/bedrock";
 import { createFakeAiAdapter } from "./providers/ai/fake";
@@ -60,6 +68,8 @@ export interface BuildAppOptions {
   aiAdapter?: AiAdapter;
   /** Job queue; defaults to pg-boss in Postgres. */
   queue?: JobQueue;
+  /** E-signature provider (tests); default from FAKE_PROVIDERS. */
+  esign?: ESignProvider;
   /** Calendar and maps providers (tests); default from FAKE_PROVIDERS. */
   calendar?: CalendarProvider;
   maps?: MapsProvider;
@@ -163,7 +173,31 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       clock,
     });
     registerResearchRoutes(app, { research: createResearchService({ db, queue, ai, clock }) });
-    registerOutreachRoutes(app, { outreach: createOutreachService({ db, queue, ai, config, clock }) });
+    const outreach = createOutreachService({ db, queue, ai, config, clock });
+    registerOutreachRoutes(app, { outreach });
+    const esignChoice = createESignProvider(config);
+    const fakeESign = esignChoice.fake;
+    const proposals = createProposalsService({
+      db,
+      queue,
+      store,
+      esign: options.esign ?? esignChoice.provider,
+      outreach,
+      config,
+      clock,
+    });
+    registerProposalRoutes(app, {
+      proposals,
+      ...(fakeESign === undefined
+        ? {}
+        : {
+            fakeSign: async (contractId: string, event: "viewed" | "signed" | "declined") => {
+              const contract = await proposals.envelopeOf(contractId);
+              return fakeESign.callback(event, contract);
+            },
+          }),
+    });
+    registerPublicProposalRoutes(app, { proposals, companyName: config.COMPANY_NAME, clock });
     registerMeetingRoutes(app, {
       meetings: createMeetingsService({
         db,

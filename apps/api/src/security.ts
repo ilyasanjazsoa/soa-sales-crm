@@ -27,11 +27,14 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   "permissions-policy": "camera=(), microphone=(), geolocation=()",
 };
 
+const ROUTE_OVERRIDABLE = new Set(["content-security-policy", "x-frame-options"]);
+
 export function registerSecurityHeaders(app: FastifyInstance): void {
   app.addHook("onSend", async (_request, reply) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
-      // A server-rendered page (e.g. /u/:token) may set its own policy: the same one plus a hash for its style.
-      if (name === "content-security-policy" && reply.hasHeader(name)) continue;
+      // Only these may be set by a route itself: the public pages (/u/:token, /p/:token) use the same policy plus a
+      // style hash, and the proposal PDF may be framed by its own page. Every other header is always the default.
+      if (ROUTE_OVERRIDABLE.has(name) && reply.hasHeader(name)) continue;
       void reply.header(name, value);
     }
   });

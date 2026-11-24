@@ -75,6 +75,8 @@ jobs:
     env:
       # Fictional; the real address is DECISIONS.md item F. Process env wins over the generated .env.
       COMPANY_POSTAL_ADDRESS: "100 Example Plaza, Dallas, TX 75201"
+      COMPANY_SIGNER_NAME: "Jordan Hale"
+      COMPANY_SIGNER_EMAIL: "jordan.hale@soa.example"
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4

@@ -453,7 +453,11 @@ function Thread({ accountId }: { accountId: string }) {
 export function OutreachTab({ account }: { account: Account }) {
   const queryClient = useQueryClient();
   const contacts = account.contacts;
-  const [contactId, setContactId] = useState(contacts.find((c) => c.isPrimary)?.id ?? contacts[0]?.id ?? "");
+  // The chosen contact, or the primary one while nothing valid is chosen (contacts can arrive after the first render).
+  const [chosenContact, setContactId] = useState("");
+  const contactId = contacts.some((c) => c.id === chosenContact)
+    ? chosenContact
+    : (contacts.find((c) => c.isPrimary)?.id ?? contacts[0]?.id ?? "");
   const [channel, setChannel] = useState<Channel>("email");
   const [tone, setTone] = useState<Tone>("professional");
   const drafts = useQuery({

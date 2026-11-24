@@ -28,6 +28,8 @@ interface Context {
   ae1DraftId: string;
   ae1EmailId: string;
   ae1MeetingId: string;
+  ae1ProposalId: string;
+  ae1ContractId: string;
 }
 
 interface RouteCase {
@@ -88,8 +90,18 @@ const PUBLIC_ROUTES = new Set([
   // Unsubscribe (§8.4): the signed token is the only credential.
   "GET /u/:token",
   "POST /u/:token",
+  // Proposal share link and e-signature callbacks (§10.3): the token or the provider's signature is the credential.
+  "GET /p/:token",
+  "POST /webhooks/esign",
 ]);
-const NON_API_ROUTES = new Set(["GET /healthz", "GET /readyz", "GET /u/:token", "POST /u/:token"]);
+const NON_API_ROUTES = new Set([
+  "GET /healthz",
+  "GET /readyz",
+  "GET /u/:token",
+  "POST /u/:token",
+  "GET /p/:token",
+  "POST /webhooks/esign",
+]);
 
 const ROUTES: Record<string, RouteCase> = {
   "GET /healthz": { access: "public", path: () => "/healthz" },
@@ -451,6 +463,107 @@ const ROUTES: Record<string, RouteCase> = {
     path: (ctx) => `/api/meetings/${ctx.ae1MeetingId}/prep`,
     asOtherAe: expectNotFound,
   },
+  // ───────── pricing, proposals, contracts ─────────
+  "POST /api/pricing/quote": {
+    access: "session",
+    path: () => "/api/pricing/quote",
+    body: () => ({
+      package: { posts: 1, armed: false, coverage: "nights", supervisor: false, addons: [], termMonths: 12 },
+    }),
+    asOtherAe: expectNoLeak, // 409 here: no pricing in this fixture
+  },
+  "GET /api/pricing/config": { access: "session", path: () => "/api/pricing/config", asOtherAe: expectNothingOf },
+  "POST /api/pricing/config": {
+    access: "manager",
+    path: () => "/api/pricing/config",
+    body: () => ({}),
+    asOtherAe: expectForbidden,
+  },
+  "GET /api/deals/:id/proposals": {
+    access: "session",
+    path: (ctx) => `/api/deals/${ctx.ae1DealId}/proposals`,
+    asOtherAe: (response, ctx) => {
+      expectNothingOf(response, ctx);
+      expect(response.body).not.toContain(ctx.ae1ProposalId);
+    },
+  },
+  "POST /api/deals/:id/proposals": {
+    access: "session",
+    path: (ctx) => `/api/deals/${ctx.ae1DealId}/proposals`,
+    body: () => ({
+      package: { posts: 1, armed: false, coverage: "nights", supervisor: false, addons: [], termMonths: 12 },
+    }),
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/proposals/:id": {
+    access: "session",
+    path: (ctx) => `/api/proposals/${ctx.ae1ProposalId}`,
+    asOtherAe: expectNotFound,
+  },
+  "PATCH /api/proposals/:id": {
+    access: "session",
+    path: (ctx) => `/api/proposals/${ctx.ae1ProposalId}`,
+    body: () => ({ coverNote: "Hijacked" }),
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/proposals/:id/approve-discount": {
+    access: "manager",
+    path: (ctx) => `/api/proposals/${ctx.ae1ProposalId}/approve-discount`,
+    asOtherAe: expectForbidden,
+  },
+  "POST /api/proposals/:id/render": {
+    access: "session",
+    path: (ctx) => `/api/proposals/${ctx.ae1ProposalId}/render`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/proposals/:id/send": {
+    access: "session",
+    path: (ctx) => `/api/proposals/${ctx.ae1ProposalId}/send`,
+    body: () => ({}),
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/proposals/:id/pdf": {
+    access: "session",
+    path: (ctx) => `/api/proposals/${ctx.ae1ProposalId}/pdf`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/proposals/:id/contract": {
+    access: "session",
+    path: (ctx) => `/api/proposals/${ctx.ae1ProposalId}/contract`,
+    body: (ctx) => ({ signerContactId: ctx.ae1ContactId, startDate: "2026-12-01" }),
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/deals/:id/contracts": {
+    access: "session",
+    path: (ctx) => `/api/deals/${ctx.ae1DealId}/contracts`,
+    asOtherAe: (response, ctx) => {
+      expectNothingOf(response, ctx);
+      expect(response.body).not.toContain(ctx.ae1ContractId);
+    },
+  },
+  "GET /api/contracts/:id": {
+    access: "session",
+    path: (ctx) => `/api/contracts/${ctx.ae1ContractId}`,
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/contracts/:id/signed.pdf": {
+    access: "session",
+    path: (ctx) => `/api/contracts/${ctx.ae1ContractId}/signed.pdf`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/contracts/:id/void": {
+    access: "session",
+    path: (ctx) => `/api/contracts/${ctx.ae1ContractId}/void`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/contracts/:id/fake-sign": {
+    access: "session",
+    path: (ctx) => `/api/contracts/${ctx.ae1ContractId}/fake-sign`,
+    body: () => ({ event: "signed" }),
+    asOtherAe: expectNotFound,
+  },
+  "GET /p/:token": { access: "public", path: () => `/p/${"z".repeat(43)}` },
+  "POST /webhooks/esign": { access: "public", path: () => "/webhooks/esign" },
   "GET /u/:token": { access: "public", path: () => "/u/not-a-real-token" },
   "POST /u/:token": { access: "public", path: () => "/u/not-a-real-token" },
 };
@@ -501,7 +614,20 @@ describe("route authorization (every /api route)", () => {
       ae1DraftId: "",
       ae1EmailId: "",
       ae1MeetingId: "",
+      ae1ProposalId: "",
+      ae1ContractId: "",
     };
+    ctx.ae1ProposalId = await one(
+      `INSERT INTO proposals (deal_id, version, package, pricing, created_by) VALUES ($1, 1,
+        '{"posts":1,"armed":false,"coverage":"nights","supervisor":false,"addons":[],"termMonths":12}',
+        '{"pricingConfigId":"x","hoursPerWeek":84,"hourlyRateCents":2900,"addonsMonthlyCents":0,"termDiscount":0,"manualDiscount":0,"annualCents":12667200,"monthlyCents":1055600,"addonLabels":{},"maxManualDiscount":0.1}',
+        $2) RETURNING id`,
+      [ctx.ae1DealId, ae1.id],
+    );
+    ctx.ae1ContractId = await one(
+      "INSERT INTO contracts (deal_id, proposal_id, esign_provider, created_by, status) VALUES ($1, $2, 'fake', $3, 'sent') RETURNING id",
+      [ctx.ae1DealId, ctx.ae1ProposalId, ae1.id],
+    );
     ctx.ae1MeetingId = await one(
       "INSERT INTO meetings (account_id, owner_user_id, title, starts_at, ends_at) VALUES ($1, $2, $3, now() + interval '2 days', now() + interval '2 days 1 hour') RETURNING id",
       [accountId, ae1.id, AE1_MEETING_TITLE],
