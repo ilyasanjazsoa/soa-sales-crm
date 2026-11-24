@@ -19,7 +19,9 @@ export const ResearchSource = z.object({
   addedBy: z.object({ id: z.uuid(), name: z.string() }).nullable(),
 });
 export type ResearchSource = z.infer<typeof ResearchSource>;
-export const SourceList = z.object({ items: z.array(ResearchSource) });
+export const JobState = z.object({ pending: z.boolean(), lastError: z.string().nullable() });
+export const SourceList = z.object({ items: z.array(ResearchSource), fetch: JobState });
+export type SourceListResponse = z.infer<typeof SourceList>;
 
 export const AddSourceRequest = z
   .object({ text: z.string().trim().min(3).max(20_000), title: z.string().trim().max(200).optional() })

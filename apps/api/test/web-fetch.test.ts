@@ -168,3 +168,85 @@ describe("text extraction and robots", () => {
     ).toEqual(["/admin"]);
   });
 });
+
+describe("nodeTransport (real sockets)", () => {
+  it("connects to the checked address whatever the hostname says (pinned, Node 22 lookup)", async () => {
+    const { createServer } = await import("node:http");
+    const { nodeTransport } = await import("../src/providers/web");
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("pinned ok");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    try {
+      // "pinned.invalid" can't resolve; the request only succeeds because it connects to 127.0.0.1 directly.
+      const response = await nodeTransport(new URL(`http://pinned.invalid:${String(port)}/`), "127.0.0.1", {
+        timeoutMs: 5000,
+        maxBytes: 1024,
+      });
+      expect(response).toMatchObject({ status: 200, body: "pinned ok" });
+    } finally {
+      server.close();
+    }
+  });
+
+  it("enforces a total deadline, not an idle timeout", async () => {
+    const { createServer } = await import("node:http");
+    const { nodeTransport } = await import("../src/providers/web");
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      const drip = setInterval(() => response.write("."), 50);
+      response.on("close", () => { clearInterval(drip); });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    const started = Date.now();
+    try {
+      await nodeTransport(new URL(`http://drip.invalid:${String(port)}/`), "127.0.0.1", {
+        timeoutMs: 300,
+        maxBytes: 1_000_000,
+      }).catch(() => undefined);
+      expect(Date.now() - started).toBeLessThan(1500);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+});
+
+describe("crawl limits", () => {
+  it("stops after 20 requests even when no page is stored", async () => {
+    let requests = 0;
+    const links = Array.from({ length: 500 }, (_, index) => `<a href="/missing${String(index)}">x</a>`).join("");
+    const transport: Transport = (url) => {
+      requests += 1;
+      if (url.pathname === "/") return Promise.resolve(html(links));
+      return Promise.resolve({ status: 404, headers: {}, body: "" });
+    };
+    const pages = await createWebFetcher({ resolve: resolver({ "harbor.example": [PUBLIC_IP] }), transport }).fetchSite(
+      "https://harbor.example/",
+    );
+    expect(pages).toHaveLength(1);
+    expect(requests).toBeLessThanOrEqual(20);
+  });
+
+  it("treats a robots.txt redirect to another host as no rules", async () => {
+    const transport: Transport = (url) =>
+      Promise.resolve(
+        url.pathname === "/robots.txt"
+          ? { status: 301, headers: { location: "https://cdn.other.example/robots.txt" }, body: "" }
+          : html("Home page"),
+      );
+    const pages = await createWebFetcher({ resolve: resolver({ "harbor.example": [PUBLIC_IP] }), transport }).fetchSite(
+      "https://harbor.example/",
+    );
+    expect(pages).toHaveLength(1);
+  });
+
+  it.each(["::ffff:0:7f00:1", "2001::1", "2001:10::1", "100::1", "fec0::1"])("treats %s as not public", (ip) => {
+    expect(isPublicAddress(ip)).toBe(false);
+  });
+});

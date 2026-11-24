@@ -17,6 +17,30 @@ export function aiCallsRepo(db: Executor) {
       if (row === undefined) throw new Error("insert returned no row");
       return row.id;
     },
+    /** Reserves a call against the user's daily limit, atomically (a per-user lock): undefined when the limit is
+        used up. The row is filled in by `complete` once the model answers. */
+    async reserve(
+      _scope: SystemScope,
+      values: typeof aiCalls.$inferInsert & { userId: string },
+      limit: number,
+      since: Date,
+    ): Promise<string | undefined> {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${values.userId}))`);
+        const [used] = await tx
+          .select({ value: count() })
+          .from(aiCalls)
+          .where(and(eq(aiCalls.userId, values.userId), gte(aiCalls.createdAt, since)));
+        if ((used?.value ?? 0) >= limit) return undefined;
+        const [row] = await tx.insert(aiCalls).values(values).returning({ id: aiCalls.id });
+        return row?.id;
+      });
+    },
+
+    async complete(_scope: SystemScope, id: string, values: Partial<typeof aiCalls.$inferInsert>): Promise<void> {
+      await db.update(aiCalls).set(values).where(eq(aiCalls.id, id));
+    },
+
     async countSince(_scope: SystemScope, userId: string, since: Date): Promise<number> {
       const [row] = await db
         .select({ value: count() })

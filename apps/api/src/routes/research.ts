@@ -12,9 +12,9 @@ export function registerResearchRoutes(app: FastifyInstance, deps: { research: R
   const { research } = deps;
   const id = (params: unknown) => IdParam.parse(params).id;
 
-  app.get("/api/accounts/:id/sources", session, async (request) => ({
-    items: await research.sources(sessionOf(request).scope, id(request.params)),
-  }));
+  app.get("/api/accounts/:id/sources", session, async (request) =>
+    research.sources(sessionOf(request).scope, id(request.params)),
+  );
   app.post("/api/accounts/:id/sources", session, async (request, reply) => {
     await research.addSource(sessionOf(request).scope, id(request.params), AddSourceRequest.parse(request.body));
     return reply.code(201).send({ ok: true });

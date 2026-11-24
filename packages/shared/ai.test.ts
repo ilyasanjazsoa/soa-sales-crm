@@ -71,7 +71,16 @@ describe("citations and client names", () => {
     expect(unnamedClientMentions("We protect LONE STAR freight  terminal today.", references)).toEqual([
       "Lone Star Freight Terminal",
     ]);
-    expect(unnamedClientMentions("Lone Star Freight Terminals Inc", references)).toEqual([]);
+    for (const variant of [
+      "Lone-Star Freight Terminal",
+      "LoneStar Freight Terminal",
+      "Lone Star Freight",
+      "Lone Star Freight Termina",
+      "Lone Star Freight Terminals Inc",
+    ]) {
+      expect(unnamedClientMentions(variant, references), variant).toEqual(["Lone Star Freight Terminal"]);
+    }
+    expect(unnamedClientMentions("A freight terminal we protect in Irving", references)).toEqual([]);
     expect(unnamedClientMentions("Open Client Plaza is a client", references)).toEqual([]);
   });
 
@@ -131,5 +140,8 @@ describe("price sentence", () => {
     expect(withoutDollarAmounts("Two posts fit the site. It costs about $400,000 a year. Start in March.")).toBe(
       "Two posts fit the site. Start in March.",
     );
+    expect(
+      withoutDollarAmounts("- Fits the yard.\n- Around 12k dollars a month.\n- USD 9,000 setup.\n- Start soon."),
+    ).toBe("- Fits the yard.\n- Start soon.");
   });
 });

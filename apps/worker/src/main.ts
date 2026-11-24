@@ -1,10 +1,9 @@
 import {
-  createAiClient,
-  createBedrockAdapter,
-  createFakeAiAdapter,
+  createFakeWebFetcher,
   createPgBossQueue,
   createS3ObjectStore,
   createWebFetcher,
+  createWorkerAi,
   JOBS,
   runImport,
   runResearchBrief,
@@ -59,13 +58,9 @@ await queue.boss.work<{ importId: string }>(JOBS.importRun, async (jobs) => {
     }
   }
 });
-const ai = createAiClient({
-  db: database.db,
-  adapter: config.FAKE_PROVIDERS ? createFakeAiAdapter() : createBedrockAdapter({ region: config.AWS_REGION }),
-  config,
-  clock: systemClock,
-});
-const fetcher = createWebFetcher();
+const ai = createWorkerAi(database.db, config, systemClock);
+// FAKE_PROVIDERS: no request leaves the machine (CLAUDE.md: every external call has a fake).
+const fetcher = config.FAKE_PROVIDERS ? createFakeWebFetcher() : createWebFetcher();
 
 const handle = (name: string, run: (data: { accountId: string; userId: string }) => Promise<void>) =>
   queue.boss.work<{ accountId: string; userId: string }>(name, async (jobs) => {

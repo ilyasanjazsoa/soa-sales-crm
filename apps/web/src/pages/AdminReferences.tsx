@@ -43,8 +43,10 @@ function AddReference() {
     },
   });
   const stats: Record<string, number> = {};
-  if (form.compliance !== "") stats.patrolCompliancePct = Number(form.compliance);
-  if (form.response !== "") stats.avgResponseMin = Number(form.response);
+  const compliance = Number(form.compliance);
+  const response = Number(form.response);
+  if (form.compliance !== "" && Number.isFinite(compliance)) stats.patrolCompliancePct = compliance;
+  if (form.response !== "" && Number.isFinite(response)) stats.avgResponseMin = response;
   return (
     <form
       className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
