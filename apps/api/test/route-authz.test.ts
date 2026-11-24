@@ -27,6 +27,7 @@ interface Context {
   ae1ImportId: string;
   ae1DraftId: string;
   ae1EmailId: string;
+  ae1MeetingId: string;
 }
 
 interface RouteCase {
@@ -63,6 +64,7 @@ const expectNothingOf = (response: LightMyRequestResponse, ctx: Context) => {
 const AE1_ACCOUNT_NAME = "First AE Logistics Park";
 const AE1_TASK_TITLE = "Call the first AE's prospect";
 const AE1_DEAL_CENTS = 98_765_432;
+const AE1_MEETING_TITLE = "First AE site walk";
 
 const expectNotFound = (response: LightMyRequestResponse) => {
   expect(response.statusCode).toBe(404);
@@ -406,6 +408,49 @@ const ROUTES: Record<string, RouteCase> = {
     path: () => "/api/suppressions/pat@first.example",
     asOtherAe: expectForbidden,
   },
+  // ───────── meetings ─────────
+  "POST /api/accounts/:id/slots": {
+    access: "session",
+    path: (ctx) => `/api/accounts/${ctx.ae1AccountId}/slots`,
+    body: () => ({ kind: "call", durationMinutes: 30 }),
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/meetings": {
+    access: "session",
+    path: () => "/api/meetings",
+    body: (ctx) => ({
+      accountId: ctx.ae1AccountId,
+      kind: "call",
+      start: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+      durationMinutes: 30,
+    }),
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/meetings": {
+    access: "session",
+    path: (ctx) =>
+      `/api/meetings?from=${encodeURIComponent(new Date(Date.now() - 86_400_000).toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 30 * 86_400_000).toISOString())}&owner=${ctx.ae1.id}`,
+    asOtherAe: (response, ctx) => {
+      expectNothingOf(response, ctx);
+      expect(response.body).not.toContain(AE1_MEETING_TITLE);
+    },
+  },
+  "PATCH /api/meetings/:id": {
+    access: "session",
+    path: (ctx) => `/api/meetings/${ctx.ae1MeetingId}`,
+    body: () => ({ status: "done" }),
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/meetings/:id/prep": {
+    access: "session",
+    path: (ctx) => `/api/meetings/${ctx.ae1MeetingId}/prep`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/meetings/:id/prep": {
+    access: "session",
+    path: (ctx) => `/api/meetings/${ctx.ae1MeetingId}/prep`,
+    asOtherAe: expectNotFound,
+  },
   "GET /u/:token": { access: "public", path: () => "/u/not-a-real-token" },
   "POST /u/:token": { access: "public", path: () => "/u/not-a-real-token" },
 };
@@ -455,7 +500,12 @@ describe("route authorization (every /api route)", () => {
       ),
       ae1DraftId: "",
       ae1EmailId: "",
+      ae1MeetingId: "",
     };
+    ctx.ae1MeetingId = await one(
+      "INSERT INTO meetings (account_id, owner_user_id, title, starts_at, ends_at) VALUES ($1, $2, $3, now() + interval '2 days', now() + interval '2 days 1 hour') RETURNING id",
+      [accountId, ae1.id, AE1_MEETING_TITLE],
+    );
     ctx.ae1DraftId = await one(
       "INSERT INTO outreach_drafts (account_id, contact_id, user_id, channel, subject, body) VALUES ($1, $2, $3, 'email', 'Hello', 'First AE draft body') RETURNING id",
       [accountId, ctx.ae1ContactId, ae1.id],

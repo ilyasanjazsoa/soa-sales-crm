@@ -273,7 +273,7 @@ function fakePrep(request: AdapterRequest): unknown {
         text:
           data?.reference === null || data?.reference === undefined
             ? "- Business cards and a notebook for the site walk"
-            : `- The ${data.reference.label} results\n- Business cards and a notebook for the site walk`,
+            : `- Results from ${data.reference.label}\n- Business cards and a notebook for the site walk`,
       },
     ],
   };
