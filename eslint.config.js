@@ -22,6 +22,7 @@ export default tseslint.config(
       "test-results/**",
       "reference/**",
       "packages/db/migrations/**",
+      ".claude/worktrees/**",
     ],
   },
   js.configs.recommended,

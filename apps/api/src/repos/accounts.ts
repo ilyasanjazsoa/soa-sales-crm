@@ -135,6 +135,18 @@ export function accountsRepo(db: Executor) {
       return rows.length > 0;
     },
 
+    /** True when the account's current owner got it by claiming it from the shared pool. */
+    async wasClaimedFromPool(_scope: SystemScope, id: string): Promise<boolean> {
+      const rows = await db.execute<{ claimed: boolean }>(sql`
+        SELECT (act.meta->>'claimed') = 'true' AND (act.meta->>'to')::uuid = acc.owner_user_id AS claimed
+        FROM ${accounts} acc
+        JOIN LATERAL (
+          SELECT meta FROM activities WHERE account_id = acc.id AND type = 'owner_change' ORDER BY occurred_at DESC LIMIT 1
+        ) act ON true
+        WHERE acc.id = ${id} AND acc.deleted_at IS NULL`);
+      return rows.rows[0]?.claimed === true;
+    },
+
     /** Duplicate check across every live account, including ones the caller can't see (§ "409 with the existing id"). */
     async findDuplicate(_scope: SystemScope, name: string, city: string | null): Promise<{ id: string } | undefined> {
       const [row] = await db
