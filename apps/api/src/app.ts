@@ -22,6 +22,8 @@ import { createResearchService } from "./services/research";
 import { registerOutreachRoutes, registerUnsubscribeRoutes } from "./routes/outreach";
 import { createOutreachService, createUnsubscribeService } from "./services/outreach";
 import { registerMeetingRoutes } from "./routes/meetings";
+import { registerTodayRoutes } from "./routes/today";
+import { createTodayService } from "./services/today";
 import { createMeetingsService } from "./services/meetings";
 import {
   createCalendarProvider,
@@ -198,18 +200,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           }),
     });
     registerPublicProposalRoutes(app, { proposals, companyName: config.COMPANY_NAME, clock });
-    registerMeetingRoutes(app, {
-      meetings: createMeetingsService({
-        db,
-        queue,
-        ai,
-        calendar: options.calendar ?? createCalendarProvider(config),
-        driveTimes: createDriveTimes(options.maps ?? createMapsProvider(config), clock),
-        refresher: createTokenRefresher(config, clock),
-        cipher: createTokenCipher(config.TOKEN_ENC_KEY),
-        clock,
-      }),
+    const meetings = createMeetingsService({
+      db,
+      queue,
+      ai,
+      calendar: options.calendar ?? createCalendarProvider(config),
+      driveTimes: createDriveTimes(options.maps ?? createMapsProvider(config), clock),
+      refresher: createTokenRefresher(config, clock),
+      cipher: createTokenCipher(config.TOKEN_ENC_KEY),
+      clock,
     });
+    registerMeetingRoutes(app, { meetings });
+    registerTodayRoutes(app, { today: createTodayService({ db, ai, meetings, clock }) });
+
     registerUnsubscribeRoutes(app, {
       unsubscribe: createUnsubscribeService({ db, secret: config.UNSUBSCRIBE_SECRET }),
       companyName: config.COMPANY_NAME,

@@ -14,3 +14,4 @@ export * from "./slots";
 export * from "./meetings";
 export * from "./proposals";
 export * from "./nba";
+export * from "./ask";

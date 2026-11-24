@@ -260,3 +260,63 @@ export function prepBriefPrompt(data: PrepPromptData): { system: string; message
     messages: [{ role: "user", text: `${crmDataBlock(data)}\n\nWrite the prep brief.` }],
   };
 }
+
+// ───────── ask (§11.2) ─────────
+export interface AskPlanData {
+  today: string;
+  weekStart: string;
+  weekEnd: string;
+  role: "ae" | "manager" | "admin";
+}
+
+const ASK_FUNCTION_GUIDE = [
+  'myOpenDeals: {"fn":"myOpenDeals"}: the rep\'s own open deals.',
+  'dealsByStage: {"fn":"dealsByStage","stage":"lead|researched|contacted|meeting_set|proposal|contract_sent|won"}.',
+  'stalledDeals: {"fn":"stalledDeals","days":7}: open deals with no activity for that many days.',
+  'meetingsBetween: {"fn":"meetingsBetween","from":"YYYY-MM-DD","to":"YYYY-MM-DD"}: the rep\'s meetings.',
+  'accountByName: {"fn":"accountByName","text":"part of a name"}.',
+  'recentReplies: {"fn":"recentReplies","days":7}: replies to CRM emails.',
+  'topAccountsByFit: {"fn":"topAccountsByFit","n":5,"filters":{"propertyType":"…","city":"…"}}.',
+  'forecast: {"fn":"forecast"}: open pipeline and weighted forecast.',
+].join("\n");
+
+/** Step 1: the fast model picks functions; it never sees CRM data. */
+export function askPlanPrompt(question: string, data: AskPlanData): { system: string; messages: AdapterMessage[] } {
+  return {
+    system: [
+      "You plan which read-only CRM queries answer a sales rep's question. You can only choose from these functions,",
+      "with exactly these arguments:",
+      ASK_FUNCTION_GUIDE,
+      "Choose at most 4 calls. Use the dates in <crm_data> for 'today' and 'this week'. If none fits, return no calls.",
+      "Never invent other functions or arguments.",
+      CRM_DATA_INSTRUCTION,
+    ].join("\n"),
+    messages: [
+      { role: "user", text: `${crmDataBlock(data)}\n\nThe question:\n${wrapUntrusted("question", question)}` },
+    ],
+  };
+}
+
+export interface AskResultData {
+  today: string;
+  results: { fn: string; summary: string; items: { label: string; sub: string; link: string }[] }[];
+  /** The question asks to draft something: point to the outreach screen instead of drafting. */
+  draftRequested: boolean;
+}
+
+/** Step 3: the writer answers from the query results only. */
+export function askAnswerPrompt(question: string, data: AskResultData): { system: string; messages: AdapterMessage[] } {
+  return {
+    system: [
+      "You answer a sales rep's question using only the query results in <crm_data>. Be brief: two or three sentences.",
+      "List the relevant results in `items`, copying label, sub and link exactly from the results; never make up a link.",
+      "If the results are empty, say plainly that nothing matched. Do not guess or add facts.",
+      "If draftRequested is true, do not write the email or message: tell the rep to open the account's outreach screen",
+      "(its item link) and use Write with AI there.",
+      CRM_DATA_INSTRUCTION,
+    ].join("\n"),
+    messages: [
+      { role: "user", text: `${crmDataBlock(data)}\n\nThe question:\n${wrapUntrusted("question", question)}` },
+    ],
+  };
+}

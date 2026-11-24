@@ -5,6 +5,8 @@ import {
   type BriefPromptData,
   type OutreachPromptData,
   type PrepPromptData,
+  type AskPlanData,
+  type AskResultData,
 } from "./prompts";
 import type { AdapterRequest, AiAdapter } from "./types";
 
@@ -279,6 +281,33 @@ function fakePrep(request: AdapterRequest): unknown {
   };
 }
 
+function fakeAsk(request: AdapterRequest): unknown {
+  const text = request.messages.map((message) => message.text).join("\n");
+  const question = (readSources(text)[0]?.text ?? "").toLowerCase();
+  const data = readCrmData(text) as (AskPlanData & Partial<AskResultData>) | undefined;
+  if (data?.results === undefined) {
+    // The planner: keywords to functions.
+    const calls: unknown[] = [];
+    if (/stall|stuck|quiet|no activity/.test(question)) calls.push({ fn: "stalledDeals", days: 7 });
+    if (question.includes("meet")) calls.push({ fn: "meetingsBetween", from: data?.weekStart, to: data?.weekEnd });
+    if (/forecast|pipeline worth|weighted/.test(question)) calls.push({ fn: "forecast" });
+    if (question.includes("repl")) calls.push({ fn: "recentReplies", days: 7 });
+    if (/fit|best accounts|top accounts/.test(question)) calls.push({ fn: "topAccountsByFit", n: 5 });
+    if (/my deals|open deals|my pipeline/.test(question)) calls.push({ fn: "myOpenDeals" });
+    const named = /(?:about|for|on|with)\s+([a-z0-9][a-z0-9 &'-]{2,60}?)(?:[?.!]|$| deal| account)/.exec(question)?.[1];
+    if (calls.length === 0 && named !== undefined) calls.push({ fn: "accountByName", text: named.trim() });
+    return { calls: calls.slice(0, 4) };
+  }
+  const items = data.results.flatMap((result) => result.items).slice(0, 10);
+  const answer =
+    items.length === 0
+      ? "Nothing in the CRM matched that."
+      : data.draftRequested === true
+        ? "Open the account's outreach screen and use Write with AI there."
+        : data.results.map((result) => result.summary).join(" ");
+  return { answer, items };
+}
+
 export function createFakeAiAdapter(
   options: { respond?: FakeResponder } = {},
 ): AiAdapter & { calls: AdapterRequest[] } {
@@ -305,7 +334,7 @@ export function createFakeAiAdapter(
                     ? fakeClassify(request)
                     : request.feature === "prep_brief"
                       ? fakePrep(request)
-                      : {};
+                      : fakeAsk(request);
       return Promise.resolve({ toolInput, inputTokens: 0, outputTokens: 0 });
     },
   };
