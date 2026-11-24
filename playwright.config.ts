@@ -9,9 +9,11 @@ export default defineConfig({
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
     { name: "phone", use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } } },
   ],
+  // The whole stack with fake providers: api, worker and web (pnpm dev creates .env and migrates first).
   webServer: {
-    command: "pnpm --filter @soa/web exec vite --port 5173 --strictPort",
-    url: "http://localhost:5173",
+    command: "pnpm dev",
+    url: "http://localhost:5173/readyz",
     reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
   },
 });
