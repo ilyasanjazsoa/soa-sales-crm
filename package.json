@@ -7,7 +7,7 @@
     "node": ">=22.9"
   },
   "scripts": {
-    "predev": "node scripts/env-init.mjs",
+    "predev": "node scripts/env-init.mjs && pnpm db:migrate",
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
     "typecheck": "tsc -p tsconfig.json && pnpm -r --no-bail typecheck",
     "lint": "eslint . --max-warnings=0 && prettier --check .",
@@ -16,7 +16,8 @@
     "e2e": "playwright test",
     "db:generate": "pnpm --filter @soa/db db:generate",
     "db:migrate": "pnpm --filter @soa/db db:migrate",
-    "env:init": "node scripts/env-init.mjs"
+    "env:init": "node scripts/env-init.mjs",
+    "db:seed": "pnpm --filter @soa/db db:seed"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

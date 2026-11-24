@@ -60,6 +60,8 @@ const EnvSchema = z.object({
   PUBLIC_URL: required(httpUrl),
   APP_URL: required(httpUrl),
   DATABASE_URL: required(databaseUrl),
+  /** Schema owner, used only to run migrations. Defaults to DATABASE_URL locally. */
+  MIGRATION_DATABASE_URL: optional(databaseUrl),
   SESSION_SECRET: required(secret),
   TOKEN_ENC_KEY: required(secret),
   UNSUBSCRIBE_SECRET: required(secret),
@@ -67,7 +69,7 @@ const EnvSchema = z.object({
   IDP: required(z.enum(["microsoft", "google"])),
   OIDC_CLIENT_ID: optional(z.string()),
   OIDC_CLIENT_SECRET: optional(z.string()),
-  OIDC_TENANT_ID: optional(z.string()),
+  OIDC_TENANT_ID: optional(z.uuid({ error: "must be the directory (tenant) ID, a GUID" })),
   ALLOWED_EMAIL_DOMAIN: required(
     z
       .string()

@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./testing": "./testing.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "tsx --env-file-if-exists=../../.env scripts/migrate.ts",
+    "db:seed": "tsx --env-file-if-exists=../../.env scripts/seed.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.44.5",
@@ -17,6 +19,7 @@
   },
   "devDependencies": {
     "@types/pg": "^8.15.5",
-    "drizzle-kit": "^0.31.4"
+    "drizzle-kit": "^0.31.4",
+    "tsx": "^4.23.15"
   }
 }

@@ -20,8 +20,12 @@ const config = loadConfig();
 const log = pino({ name: "worker", level: config.LOG_LEVEL ?? "info" });
 const boss = new PgBoss({ connectionString: config.DATABASE_URL });
 
-boss.on("error", (error: Error) => {
-  log.error({ err: { name: error.name, message: error.message } }, "pg-boss error");
+// Log what failed, never the message: errors can carry job data (CLAUDE.md rule 8).
+boss.on("error", (error: Error & { code?: unknown }) => {
+  log.error(
+    { err: { name: error.name, code: typeof error.code === "string" ? error.code : undefined } },
+    "pg-boss error",
+  );
 });
 
 await boss.start();
