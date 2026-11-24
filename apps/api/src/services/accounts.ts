@@ -18,7 +18,9 @@ import {
 } from "@soa/shared";
 import type { z } from "zod";
 import type { Clock } from "../clock";
-import { conflict, forbidden, notFound, unprocessable } from "../errors";
+import { badRequest, conflict, forbidden, notFound, unprocessable } from "../errors";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 import { accountsRepo, type AccountRow } from "../repos/accounts";
 import { auditRepo } from "../repos/audit";
 import { activitiesRepo, contactsRepo, signalsRepo, suppressionsRepo } from "../repos/children";
@@ -96,6 +98,27 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
       return (await contacts.update(scope, created.id, { isPrimary: true })) ?? created;
     }
     return created;
+  };
+
+  /** The activity (and, where the rules require it, the audit row) for a change, in the caller's transaction. */
+  const record = async (
+    tx: Executor,
+    scope: UserScope,
+    accountId: string,
+    subject: string,
+    meta: Record<string, unknown> = {},
+    audit?: { action: string; entityType: string; entityId: string; ip: string | null },
+  ) => {
+    await activitiesRepo(tx).insert(scope, { accountId, type: "note", subject, meta: { change: true, ...meta } });
+    if (audit !== undefined) {
+      await auditRepo(tx).write(scope, {
+        action: audit.action,
+        entityType: audit.entityType,
+        entityId: audit.entityId,
+        meta,
+        ip: audit.ip,
+      });
+    }
   };
 
   const service = {
@@ -195,23 +218,45 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
       return service.get(scope, id);
     },
 
-    async update(scope: UserScope, id: string, patch: AccountPatch): Promise<Account> {
-      await db.transaction(async (tx) => {
-        const current = await requireEditable(tx, scope, id);
-        const name = patch.name ?? current.name;
-        const city = patch.city === undefined ? current.city : patch.city;
-        if (
-          name.toLowerCase() !== current.name.toLowerCase() ||
-          (city ?? "").toLowerCase() !== (current.city ?? "").toLowerCase()
-        ) {
-          const duplicate = await accountsRepo(tx).findDuplicate(systemScope("duplicate check"), name, city);
-          if (duplicate !== undefined && duplicate.id !== id) {
-            throw conflict("duplicate", "An account with this name and city already exists.", { id: duplicate.id });
+    async update(scope: UserScope, id: string, patch: AccountPatch, ip: string | null = null): Promise<Account> {
+      await db
+        .transaction(async (tx) => {
+          const current = await requireEditable(tx, scope, id);
+          const name = patch.name ?? current.name;
+          const city = patch.city === undefined ? current.city : patch.city;
+          if (
+            name.toLowerCase() !== current.name.toLowerCase() ||
+            (city ?? "").toLowerCase() !== (current.city ?? "").toLowerCase()
+          ) {
+            const duplicate = await accountsRepo(tx).findDuplicate(systemScope("duplicate check"), name, city);
+            if (duplicate !== undefined && duplicate.id !== id) {
+              throw conflict("duplicate", "An account with this name and city already exists.", { id: duplicate.id });
+            }
           }
-        }
-        await accountsRepo(tx).update(scope, id, patch);
-        await recomputeFit(tx, scope, id, clock());
-      });
+          await accountsRepo(tx).update(scope, id, patch);
+          const fields = Object.keys(patch).sort();
+          await record(
+            tx,
+            scope,
+            id,
+            "Account details updated",
+            { fields },
+            {
+              action: "account.update",
+              entityType: "account",
+              entityId: id,
+              ip,
+            },
+          );
+          await recomputeFit(tx, scope, id, clock());
+        })
+        .catch((error: unknown) => {
+          // Two renames to the same name and city at once: the dedupe index rejects the second.
+          if ((error as { cause?: { code?: string } }).cause?.code === "23505") {
+            throw conflict("duplicate", "An account with this name and city already exists.");
+          }
+          throw error;
+        });
       return service.get(scope, id);
     },
 
@@ -219,15 +264,12 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
     async claim(scope: UserScope, id: string, ip: string | null): Promise<Account> {
       await db.transaction(async (tx) => {
         const repo = accountsRepo(tx);
+        // Visible when the request started (snapshot read): otherwise this is someone else's account → 404.
+        const before = await repo.get(scope, id);
+        if (before === undefined) throw notFound();
         const claimed = await repo.claim(scope, id);
-        if (claimed === undefined) {
-          // The acceptance rule for claims: a live account someone else owns is 409, even if the caller can no
-          // longer see it (the usual case: two reps clicked Claim at once). The response carries no account data.
-          if (await repo.existsLive(systemScope("claim conflict check"), id)) {
-            throw conflict("already_owned", "Someone has already claimed this account.");
-          }
-          throw notFound();
-        }
+        // It was in the pool when we looked, but another rep's claim committed first → 409.
+        if (claimed === undefined) throw conflict("already_owned", "Someone has already claimed this account.");
         const reassigned = await dealsRepo(tx).reassignOpen(scope, id, scope.userId);
         if (reassigned.length === 0) await newLeadDeal(tx, scope, claimed, scope.userId);
         await activitiesRepo(tx).insert(scope, {
@@ -275,15 +317,23 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
 
     async remove(scope: UserScope, id: string, purge: boolean, ip: string | null): Promise<void> {
       await db.transaction(async (tx) => {
-        await requireEditable(tx, scope, id);
         if (purge) {
+          // Purge also works on soft-deleted accounts (the usual order: delete, then purge).
           if (scope.role === "ae") throw forbidden("Only a manager can permanently delete an account.");
-          await accountsRepo(tx).purge(scope, id);
+          if (!(await accountsRepo(tx).purge(scope, id))) throw notFound();
           await auditRepo(tx).write(scope, { action: "account.purge", entityType: "account", entityId: id, ip });
           return;
         }
+        await requireEditable(tx, scope, id);
         await accountsRepo(tx).softDelete(scope, id);
-        await auditRepo(tx).write(scope, { action: "account.delete", entityType: "account", entityId: id, ip });
+        await record(
+          tx,
+          scope,
+          id,
+          "Account deleted",
+          {},
+          { action: "account.delete", entityType: "account", entityId: id, ip },
+        );
       });
     },
 
@@ -292,6 +342,9 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
       return db.transaction(async (tx) => {
         const account = await requireEditable(tx, scope, accountId);
         const created = await addContactIn(tx, scope, account, input);
+        await record(tx, scope, accountId, `Contact added: ${created.firstName} ${created.lastName}`.trim(), {
+          contactId: created.id,
+        });
         await recomputeFit(tx, scope, accountId, clock());
         return toContact(created);
       });
@@ -310,6 +363,10 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
         if (patch.isPrimary === true) await contacts.clearPrimary(scope, current.accountId, id);
         const updated = await contacts.update(scope, id, values);
         if (updated === undefined) throw notFound();
+        await record(tx, scope, current.accountId, `Contact updated: ${updated.firstName} ${updated.lastName}`.trim(), {
+          contactId: id,
+          fields: Object.keys(patch).sort(),
+        });
         await recomputeFit(tx, scope, current.accountId, clock());
         return toContact(updated);
       });
@@ -319,6 +376,7 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
       await db.transaction(async (tx) => {
         const deleted = await contactsRepo(tx).delete(scope, id);
         if (deleted === undefined) throw notFound();
+        await record(tx, scope, deleted.accountId, `Contact removed: ${deleted.firstName} ${deleted.lastName}`.trim());
         await recomputeFit(tx, scope, deleted.accountId, clock());
       });
     },
@@ -341,7 +399,19 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
           doNotCall: true,
         });
         if (erased === undefined) throw notFound();
-        await auditRepo(tx).write(scope, { action: "contact.erase", entityType: "contact", entityId: id, ip });
+        await record(
+          tx,
+          scope,
+          current.accountId,
+          "Contact details erased",
+          { contactId: id },
+          {
+            action: "contact.erase",
+            entityType: "contact",
+            entityId: id,
+            ip,
+          },
+        );
         await recomputeFit(tx, scope, current.accountId, clock());
         return toContact(erased);
       });
@@ -364,6 +434,7 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
           confirmed: true, // entered by a person
           createdBy: scope.userId,
         });
+        await record(tx, scope, accountId, `Signal added: ${created.text}`, { signalId: created.id });
         await recomputeFit(tx, scope, accountId, clock());
         return toSignal(created);
       });
@@ -373,6 +444,15 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
       return db.transaction(async (tx) => {
         const updated = await signalsRepo(tx).update(scope, id, patch);
         if (updated === undefined) throw notFound();
+        await record(
+          tx,
+          scope,
+          updated.accountId,
+          `${patch.confirmed === true ? "Signal confirmed" : "Signal updated"}: ${updated.text}`,
+          {
+            signalId: id,
+          },
+        );
         await recomputeFit(tx, scope, updated.accountId, clock());
         return toSignal(updated);
       });
@@ -382,6 +462,7 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
       await db.transaction(async (tx) => {
         const deleted = await signalsRepo(tx).delete(scope, id);
         if (deleted === undefined) throw notFound();
+        await record(tx, scope, deleted.accountId, `Signal removed: ${deleted.text}`, { signalId: id });
         await recomputeFit(tx, scope, deleted.accountId, clock());
       });
     },
@@ -394,20 +475,13 @@ export function createAccountsService({ db, clock }: { db: Database; clock: Cloc
       limit: number,
     ): Promise<ActivityPageT> {
       if ((await accountsRepo(db).get(scope, accountId)) === undefined) throw notFound();
-      let before: { at: Date; id: string } | undefined;
-      if (cursor !== undefined) {
-        const [at, id] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
-        if (at !== undefined && id !== undefined && !Number.isNaN(Date.parse(at))) before = { at: new Date(at), id };
-      }
-      const rows = await activitiesRepo(db).timeline(scope, accountId, before, limit);
+      if (cursor !== undefined && !UUID.test(cursor)) throw badRequest("That page link is not valid.");
+      const rows = await activitiesRepo(db).timeline(scope, accountId, cursor, limit);
       const page = rows.slice(0, limit);
       const last = page.at(-1);
       return {
         items: page.map(toActivity),
-        nextCursor:
-          rows.length > limit && last !== undefined
-            ? Buffer.from(`${last.activity.occurredAt.toISOString()}|${last.activity.id}`).toString("base64url")
-            : null,
+        nextCursor: rows.length > limit && last !== undefined ? last.activity.id : null,
       };
     },
 

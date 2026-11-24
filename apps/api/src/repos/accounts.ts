@@ -1,7 +1,7 @@
 import { tables, type Executor } from "@soa/db";
 import { dedupeKey } from "@soa/shared";
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
-import type { Scope, SystemScope } from "./scope";
+import { seesEverything, type Scope, type SystemScope } from "./scope";
 import { accountEditable, accountVisible, anyOf } from "./visibility";
 
 const { accounts, users, deals, contacts, signals, researchSources, tasks, researchBriefs } = tables;
@@ -164,6 +164,15 @@ export function accountsRepo(db: Executor) {
       return keys;
     },
 
+    /** Dedupe keys of live accounts an import created (to resume it). */
+    async keysFromSource(_scope: SystemScope, importId: string): Promise<Set<string>> {
+      const rows = await db
+        .select({ name: accounts.name, city: accounts.city })
+        .from(accounts)
+        .where(and(eq(accounts.sourceRef, importId), eq(accounts.source, "csv"), isNull(accounts.deletedAt)));
+      return new Set(rows.map((row) => dedupeKey(row.name, row.city)));
+    },
+
     /** Inserts; returns undefined when the dedupe index rejects it (same name and city). */
     async insert(_scope: Scope, values: NewAccount): Promise<AccountRow | undefined> {
       const [row] = await db
@@ -214,14 +223,18 @@ export function accountsRepo(db: Executor) {
     },
 
     /** Hard delete with cascade. Managers only (checked by the caller); still scoped. */
+    /** Hard delete with cascade, including soft-deleted accounts. Managers (and the system) only. */
     async purge(scope: Scope, id: string): Promise<boolean> {
-      if (scope.kind === "user" && scope.role === "ae") return false;
+      if (!seesEverything(scope)) return false;
       const rows = await db.delete(accounts).where(eq(accounts.id, id)).returning({ id: accounts.id });
       return rows.length > 0;
     },
 
-    async setFit(_scope: Scope, id: string, score: number, reasons: string[]): Promise<void> {
-      await db.update(accounts).set({ fitScore: score, fitReasons: reasons }).where(eq(accounts.id, id));
+    async setFit(scope: Scope, id: string, score: number, reasons: string[]): Promise<void> {
+      await db
+        .update(accounts)
+        .set({ fitScore: score, fitReasons: reasons })
+        .where(and(eq(accounts.id, id), accountVisible(scope)));
     },
 
     /** Inputs for the fit score. */
@@ -239,7 +252,7 @@ export function accountsRepo(db: Executor) {
           .from(signals)
           .where(eq(signals.accountId, id)),
         db
-          .select({ isPrimary: contacts.isPrimary, email: contacts.email })
+          .select({ isPrimary: contacts.isPrimary, email: contacts.email, emailStatus: contacts.emailStatus })
           .from(contacts)
           .where(eq(contacts.accountId, id)),
       ]);

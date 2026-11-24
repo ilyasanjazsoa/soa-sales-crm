@@ -31,7 +31,7 @@ import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { z } from "zod";
 import { api, ApiError } from "../api";
-import { choosableStages, LoseDialog, StagePill } from "../deal-ui";
+import { choosableStages, LoseDialog, needsOverrideReason, OverrideDialog, StagePill } from "../deal-ui";
 import { useMe } from "../session";
 import { Btn, Empty, ErrorState, Field, inputClass, Loading, Modal, Panel, Pill } from "../ui";
 
@@ -394,8 +394,9 @@ function OwnerSelect({ account }: { account: Account }) {
       void queryClient.invalidateQueries({ queryKey: ["timeline", account.id] });
     },
   });
+  const problem = users.error ?? assign.error;
   return (
-    <Field label="Owner">
+    <Field label="Owner" {...(problem === null ? {} : { hint: problem.message })}>
       <select
         className={inputClass}
         value={account.owner?.id ?? ""}
@@ -433,11 +434,22 @@ export function AccountPage() {
     mutationFn: () => api(`/api/accounts/${id}/claim`, Account, { method: "POST" }),
     onSettled: refresh,
   });
+  const [override, setOverride] = useState<{ dealId: string; stage: DealStage } | null>(null);
   const move = useMutation({
-    mutationFn: ({ dealId, stage }: { dealId: string; stage: DealStage }) =>
-      api(`/api/deals/${dealId}/stage`, Deal, { method: "POST", body: { stage } }),
+    mutationFn: ({ dealId, stage, reason }: { dealId: string; stage: DealStage; reason?: string }) =>
+      api(`/api/deals/${dealId}/stage`, Deal, {
+        method: "POST",
+        body: { stage, ...(reason === undefined ? {} : { reason }) },
+      }),
+    onSuccess: () => {
+      setOverride(null);
+    },
     onSettled: refresh,
   });
+  const requestMove = (dealId: string, stage: DealStage) => {
+    if (needsOverrideReason(stage)) setOverride({ dealId, stage });
+    else move.mutate({ dealId, stage });
+  };
   const lose = useMutation({
     mutationFn: ({ dealId, reason, note }: { dealId: string; reason: string; note: string }) =>
       api(`/api/deals/${dealId}/lose`, Deal, { method: "POST", body: { reason, ...(note === "" ? {} : { note }) } }),
@@ -507,7 +519,7 @@ export function AccountPage() {
                     value={deal.stage}
                     disabled={move.isPending}
                     onChange={(event) => {
-                      move.mutate({ dealId: deal.id, stage: event.target.value as DealStage });
+                      requestMove(deal.id, event.target.value as DealStage);
                     }}
                   >
                     {[...new Set([deal.stage, ...choosableStages(role)])].map((stage) => (
@@ -627,6 +639,18 @@ export function AccountPage() {
         </div>
       </div>
 
+      {override !== null && (
+        <OverrideDialog
+          stage={override.stage}
+          busy={move.isPending}
+          onCancel={() => {
+            setOverride(null);
+          }}
+          onConfirm={(reason) => {
+            move.mutate({ ...override, reason });
+          }}
+        />
+      )}
       {losing && deal !== null && (
         <LoseDialog
           name={a.name}

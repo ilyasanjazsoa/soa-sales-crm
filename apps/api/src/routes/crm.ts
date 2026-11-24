@@ -62,7 +62,7 @@ export function registerCrmRoutes(
   );
   app.get("/api/accounts/:id", session, async (request) => accounts.get(sessionOf(request).scope, id(request.params)));
   app.patch("/api/accounts/:id", session, async (request) =>
-    accounts.update(sessionOf(request).scope, id(request.params), AccountPatch.parse(request.body)),
+    accounts.update(sessionOf(request).scope, id(request.params), AccountPatch.parse(request.body), request.ip),
   );
   app.post("/api/accounts/:id/claim", session, async (request) =>
     accounts.claim(sessionOf(request).scope, id(request.params), request.ip),
@@ -142,16 +142,12 @@ export function registerCrmRoutes(
       ),
   );
   app.patch("/api/deals/:id", session, async (request) =>
-    deals.update(sessionOf(request).scope, id(request.params), DealPatch.parse(request.body)),
+    deals.update(sessionOf(request).scope, id(request.params), DealPatch.parse(request.body), request.ip),
   );
-  app.post("/api/deals/:id/stage", session, async (request) =>
-    deals.moveStage(
-      sessionOf(request).scope,
-      id(request.params),
-      StageMoveRequest.parse(request.body).stage,
-      request.ip,
-    ),
-  );
+  app.post("/api/deals/:id/stage", session, async (request) => {
+    const body = StageMoveRequest.parse(request.body);
+    return deals.moveStage(sessionOf(request).scope, id(request.params), body.stage, request.ip, body.reason);
+  });
   app.post("/api/deals/:id/lose", session, async (request) => {
     const body = LoseRequest.parse(request.body);
     return deals.lose(sessionOf(request).scope, id(request.params), body.reason, body.note, request.ip);

@@ -83,3 +83,48 @@ export function LoseDialog(props: {
     </Modal>
   );
 }
+
+/** Stages a manager sets by hand only with a reason (§5). */
+export const needsOverrideReason = (stage: DealStage) => stageIndex(stage) > stageIndex("proposal");
+
+export function OverrideDialog(props: {
+  stage: DealStage;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  return (
+    <Modal title={`Set ${STAGE_LABELS[props.stage]} by hand`} onClose={props.onCancel}>
+      <p className="text-sm text-zinc-400">
+        {STAGE_LABELS[props.stage]} is normally set by the e-signature system. Say why you are setting it yourself; this
+        is recorded in the audit log.
+      </p>
+      <div className="mt-3">
+        <Field label="Reason (required)">
+          <input
+            className={inputClass}
+            value={reason}
+            maxLength={300}
+            onChange={(event) => {
+              setReason(event.target.value);
+            }}
+          />
+        </Field>
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <Btn onClick={props.onCancel}>Cancel</Btn>
+        <Btn
+          kind="primary"
+          busy={props.busy}
+          disabled={reason.trim() === ""}
+          onClick={() => {
+            props.onConfirm(reason.trim());
+          }}
+        >
+          Set stage
+        </Btn>
+      </div>
+    </Modal>
+  );
+}

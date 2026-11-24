@@ -82,7 +82,7 @@ describe("visibility", () => {
     const urls = [
       ["GET", `/api/accounts/${accountId}`],
       ["PATCH", `/api/accounts/${accountId}`, { name: "x" }],
-      // Claiming an owned account is 409 instead (see "claiming").
+      ["POST", `/api/accounts/${accountId}/claim`],
       ["DELETE", `/api/accounts/${accountId}`],
       ["POST", `/api/accounts/${accountId}/contacts`, { firstName: "x" }],
       ["PATCH", `/api/contacts/${contactId}`, { firstName: "x" }],
@@ -328,18 +328,25 @@ describe("stage rules", () => {
       ).json(),
     );
     const dealId = account.deal?.id ?? "";
-    const won = await app.inject({
+    const noReason = await app.inject({
       method: "POST",
       url: `/api/deals/${dealId}/stage`,
       ...as(manager),
       payload: { stage: "won" },
     });
-    expect(Deal.parse(won.json())).toMatchObject({ stage: "won", status: "won" });
+    expect(noReason.json()).toMatchObject({ error: { code: "reason_required" } });
+    const won = await app.inject({
+      method: "POST",
+      url: `/api/deals/${dealId}/stage`,
+      ...as(manager),
+      payload: { stage: "won", reason: "Signed on paper at the site walk" },
+    });
+    expect(won.json(), won.body).toMatchObject({ stage: "won", status: "won" });
     const [audit] = await ownerQuery<{ meta: Record<string, unknown> }>(
       "SELECT meta FROM audit_log WHERE action = 'deal.stage' AND entity_id = $1",
       [dealId],
     );
-    expect(audit?.meta).toMatchObject({ to: "won", managerOverride: true });
+    expect(audit?.meta).toMatchObject({ to: "won", managerOverride: true, reason: "Signed on paper at the site walk" });
   });
 });
 
@@ -532,5 +539,180 @@ describe("fit score, contacts, notes, tasks and export", () => {
     expect(response.headers["content-type"]).toContain("text/csv");
     expect(response.body).toContain(`"'=HYPERLINK(""http://x.example"")"`);
     expect(await ownerQuery("SELECT 1 FROM audit_log WHERE action = 'export.accounts'")).toHaveLength(1);
+  });
+});
+
+describe("review fixes", () => {
+  it("a partial contact update keeps the fields it did not send", async () => {
+    const { first, firstSession } = await twoAes();
+    const accountId = await createAccount("Partial Patch Park", first.id);
+    const contact = await app.inject({
+      method: "POST",
+      url: `/api/accounts/${accountId}/contacts`,
+      ...as(firstSession),
+      payload: { firstName: "Ana", lastName: "Lopez", title: "GM" },
+    });
+    const id = contact.json<{ id: string }>().id;
+    for (const payload of [{ doNotCall: true }, { isPrimary: true }, { title: "VP" }]) {
+      const updated = await app.inject({ method: "PATCH", url: `/api/contacts/${id}`, ...as(firstSession), payload });
+      expect(updated.json()).toMatchObject({ firstName: "Ana", lastName: "Lopez" });
+    }
+  });
+
+  it("pages the timeline without skipping rows that share a timestamp, and rejects a bad cursor", async () => {
+    const { first, firstSession } = await twoAes();
+    const accountId = await createAccount("Timeline Paging Park", first.id);
+    await ownerQuery(
+      `INSERT INTO activities (account_id, type, subject, occurred_at)
+       SELECT $1, 'note', 'Note ' || g, now() - (CASE WHEN g = 6 THEN interval '56 microseconds' ELSE interval '0' END)
+       FROM generate_series(1, 6) AS g`,
+      [accountId],
+    );
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const query: string = cursor === null ? "" : `&cursor=${cursor}`;
+      const page = (
+        await app.inject({
+          method: "GET",
+          url: `/api/accounts/${accountId}/timeline?limit=2${query}`,
+          ...as(firstSession),
+        })
+      ).json<{ items: { subject: string }[]; nextCursor: string | null }>();
+      seen.push(...page.items.map((item) => item.subject));
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+    expect(seen.sort()).toEqual(["Note 1", "Note 2", "Note 3", "Note 4", "Note 5", "Note 6"]);
+    const bad = await app.inject({
+      method: "GET",
+      url: `/api/accounts/${accountId}/timeline?cursor=bm90LWEtdXVpZA`,
+      ...as(firstSession),
+    });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it("records an activity and audit row when a deal's package changes, and refuses closed deals", async () => {
+    await pricing();
+    const { firstSession } = await twoAes();
+    const account = Account.parse(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/accounts",
+          ...as(firstSession),
+          payload: { name: "Package Change Park", propertyType: "Industrial", city: "Irving" },
+        })
+      ).json(),
+    );
+    const dealId = account.deal?.id ?? "";
+    const pkg = { posts: 2, armed: false, coverage: "24_7", supervisor: false, addons: ["video"], termMonths: 36 };
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/api/deals/${dealId}`,
+      ...as(firstSession),
+      payload: { package: pkg },
+    });
+    expect(Deal.parse(updated.json()).annualValueCents).toBe(50_643_360);
+    const [audit] = await ownerQuery<{ meta: Record<string, unknown> }>(
+      "SELECT meta FROM audit_log WHERE action = 'deal.update'",
+    );
+    expect(audit?.meta).toMatchObject({ toCents: 50_643_360 });
+    await app.inject({
+      method: "POST",
+      url: `/api/deals/${dealId}/lose`,
+      ...as(firstSession),
+      payload: { reason: "Price" },
+    });
+    const closed = await app.inject({
+      method: "PATCH",
+      url: `/api/deals/${dealId}`,
+      ...as(firstSession),
+      payload: { name: "x" },
+    });
+    expect(closed.statusCode).toBe(422);
+  });
+
+  it("an AE can't change a deal once its account is returned to the pool", async () => {
+    await pricing();
+    const { first, firstSession } = await twoAes();
+    await createUser("manager@soa.example", "manager");
+    const manager = await signIn(app, "manager@soa.example");
+    const accountId = await createAccount("Pool Return Park", null);
+    const claimed = Account.parse(
+      (await app.inject({ method: "POST", url: `/api/accounts/${accountId}/claim`, ...as(firstSession) })).json(),
+    );
+    expect(claimed.owner?.id).toBe(first.id);
+    await app.inject({
+      method: "POST",
+      url: `/api/accounts/${accountId}/assign`,
+      ...as(manager),
+      payload: { ownerUserId: null },
+    });
+    const move = await app.inject({
+      method: "POST",
+      url: `/api/deals/${claimed.deal?.id ?? ""}/stage`,
+      ...as(firstSession),
+      payload: { stage: "contacted" },
+    });
+    expect([403, 404]).toContain(move.statusCode);
+  });
+
+  it("a manager can purge an account that was already soft-deleted", async () => {
+    const { first, firstSession } = await twoAes();
+    await createUser("manager@soa.example", "manager");
+    const manager = await signIn(app, "manager@soa.example");
+    const accountId = await createAccount("Purge Me Park", first.id);
+    expect(
+      (await app.inject({ method: "DELETE", url: `/api/accounts/${accountId}`, ...as(firstSession) })).statusCode,
+    ).toBe(204);
+    expect(
+      (await app.inject({ method: "DELETE", url: `/api/accounts/${accountId}?purge=true`, ...as(manager) })).statusCode,
+    ).toBe(204);
+    expect(await ownerQuery("SELECT 1 FROM accounts WHERE id = $1", [accountId])).toHaveLength(0);
+  });
+
+  it("an import runs only after a preview, only once at a time, and resumes after a failure", async () => {
+    const { firstSession } = await twoAes();
+    const boundary = "imp";
+    const csv = "Account name,City\nResume One Park,Irving\nResume Two Park,Plano\n";
+    const upload = await app.inject({
+      method: "POST",
+      url: "/api/imports",
+      ...as(firstSession),
+      headers: { ...firstSession.headers, "content-type": `multipart/form-data; boundary=${boundary}` },
+      payload: `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="r.csv"\r\n\r\n${csv}\r\n--${boundary}--\r\n`,
+    });
+    const { id, suggestedMap } = ImportUploadResponse.parse(upload.json());
+    expect((await app.inject({ method: "POST", url: `/api/imports/${id}/run`, ...as(firstSession) })).statusCode).toBe(
+      409,
+    );
+    await app.inject({
+      method: "POST",
+      url: `/api/imports/${id}/preview`,
+      ...as(firstSession),
+      payload: { columnMap: suggestedMap },
+    });
+    const runs = await Promise.all(
+      [1, 2].map(() => app.inject({ method: "POST", url: `/api/imports/${id}/run`, ...as(firstSession) })),
+    );
+    expect(runs.map((run) => run.statusCode).sort()).toEqual([202, 409]);
+
+    // Simulate a crash after the first row: one account exists, the import is marked failed.
+    await ownerQuery(
+      "INSERT INTO accounts (name, property_type, city, source, source_ref) VALUES ('Resume One Park', 'Industrial', 'Irving', 'csv', $1)",
+      [id],
+    );
+    await ownerQuery("UPDATE imports SET status = 'failed' WHERE id = $1", [id]);
+    expect((await app.inject({ method: "POST", url: `/api/imports/${id}/run`, ...as(firstSession) })).statusCode).toBe(
+      202,
+    );
+    const handle = createDb(testDatabaseUrl(), { max: 2 });
+    await runImport({ db: handle.db, store, clock: () => new Date() }, id);
+    await handle.close();
+    const status = ImportStatus.parse(
+      (await app.inject({ method: "GET", url: `/api/imports/${id}`, ...as(firstSession) })).json(),
+    );
+    expect(status).toMatchObject({ status: "done", rowsCreated: 2, rowsSkipped: 0 });
+    expect(store.objects.has(`imports/${id}.csv`)).toBe(false);
   });
 });

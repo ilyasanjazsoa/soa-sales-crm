@@ -95,3 +95,11 @@ describe("dedupeKey and applyColumnMap", () => {
     });
   });
 });
+
+import { ContactPatch } from "./crm";
+describe("ContactPatch", () => {
+  it("leaves out fields that were not sent (no defaults)", () => {
+    expect(ContactPatch.parse({ doNotCall: true })).toEqual({ doNotCall: true });
+    expect(ContactPatch.parse({ isPrimary: true })).toEqual({ isPrimary: true });
+  });
+});

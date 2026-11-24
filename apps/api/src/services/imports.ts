@@ -41,57 +41,84 @@ export const MAX_IMPORT_ROWS = 20_000;
 const SavedSettings = z.object({ columnMap: ColumnMap, assignToMe: z.boolean() });
 const RowError = z.object({ row: z.number(), name: z.string().nullable(), reason: z.string() });
 
-export function parseCsv(file: Buffer): string[][] {
-  let records: string[][];
+export interface ParsedCsv {
+  headers: string[];
+  /** Data records with the spreadsheet line each one starts on (the header is line 1). */
+  rows: { line: number; record: string[] }[];
+}
+
+export function parseCsv(file: Buffer): ParsedCsv {
+  let parsed: { record: string[]; info: { lines: number } }[];
   try {
-    const parsed: unknown = parse(file, {
+    const output: unknown = parse(file, {
       bom: true,
       relax_column_count: true,
       skip_empty_lines: true,
       trim: true,
       max_record_size: 64 * 1024,
+      info: true,
     });
-    records = parsed as string[][];
+    parsed = output as { record: string[]; info: { lines: number } }[];
   } catch {
     throw badRequest("The file could not be read as CSV.");
   }
-  if (records.length < 2) throw badRequest("The file needs a header row and at least one data row.");
-  if (records.length - 1 > MAX_IMPORT_ROWS)
-    throw badRequest(`Import at most ${String(MAX_IMPORT_ROWS)} rows at a time.`);
-  return records;
+  const [header, ...data] = parsed;
+  if (header === undefined || data.length === 0) {
+    throw badRequest("The file needs a header row and at least one data row.");
+  }
+  if (data.length > MAX_IMPORT_ROWS) throw badRequest(`Import at most ${String(MAX_IMPORT_ROWS)} rows at a time.`);
+  // info.lines is the line a record ends on; a record spanning lines starts earlier, so count back its newlines.
+  return {
+    headers: header.record,
+    rows: data.map(({ record, info }) => ({
+      line: info.lines - record.reduce((sum, field) => sum + (field.match(/\n/g)?.length ?? 0), 0),
+      record,
+    })),
+  };
 }
 
 export interface Judged {
-  row: number; // 1-based line in the file, counting the header as row 1
+  /** The spreadsheet line the record starts on (the header is line 1). */
+  row: number;
+  record: string[];
   name: string | null;
-  verdict: "new" | "duplicate" | "invalid";
+  /** created: made by an earlier run of this same import (when resuming). */
+  verdict: "new" | "duplicate" | "invalid" | "created";
   reason?: string;
 }
 
-/** Classifies every data row: invalid, duplicate (in the CRM or earlier in the file), or new. */
-export async function judgeRows(db: Executor, records: string[][], map: ColumnMap): Promise<Judged[]> {
-  const validated = records.slice(1).map((record, index) => {
+/** Classifies every data row: invalid, duplicate (in the CRM or earlier in the file), new, or already created. */
+export async function judgeRows(
+  db: Executor,
+  csv: ParsedCsv,
+  map: ColumnMap,
+  createdByThisImport: ReadonlySet<string> = new Set(),
+): Promise<Judged[]> {
+  const validated = csv.rows.map(({ line, record }) => {
     const values = applyColumnMap(record, map);
-    return { row: index + 2, values, result: validateImportRow(values) };
+    return { row: line, record, values, result: validateImportRow(values) };
   });
   const names = [
     ...new Set(validated.flatMap((entry) => (entry.result.ok ? [entry.result.row.account.name.toLowerCase()] : []))),
   ];
   const existing = await accountsRepo(db).existingKeys(systemScope("import duplicate check"), names);
   const seen = new Set<string>();
-  return validated.map(({ row, values, result }) => {
-    if (!result.ok)
-      return {
-        row,
-        name: (values.account_name ?? "").trim() === "" ? null : (values.account_name ?? "").trim(),
-        verdict: "invalid",
-        reason: result.reason,
-      };
-    const key = dedupeKey(result.row.account.name, result.row.account.city);
+  return validated.map(({ row, record, values, result }): Judged => {
+    const typedName = (values.account_name ?? "").trim();
+    if (!result.ok) {
+      return { row, record, name: typedName === "" ? null : typedName, verdict: "invalid", reason: result.reason };
+    }
+    const name = result.row.account.name;
+    const key = dedupeKey(name, result.row.account.city);
+    if (createdByThisImport.has(key) && !seen.has(key)) {
+      seen.add(key);
+      return { row, record, name, verdict: "created" };
+    }
     if (existing.has(key) || seen.has(key)) {
       return {
         row,
-        name: result.row.account.name,
+        record,
+        name,
         verdict: "duplicate",
         reason: existing.has(key)
           ? "Already in the CRM (same name and city)"
@@ -99,7 +126,7 @@ export async function judgeRows(db: Executor, records: string[][], map: ColumnMa
       };
     }
     seen.add(key);
-    return { row, name: result.row.account.name, verdict: "new" };
+    return { row, record, name, verdict: "new" };
   });
 }
 
@@ -122,7 +149,7 @@ export function createImportsService(deps: { db: Database; store: ObjectStore; q
   return {
     async upload(scope: UserScope, filename: string, file: Buffer): Promise<ImportUploadResponse> {
       if (file.length > MAX_IMPORT_BYTES) throw badRequest("The file is larger than 10 MB.");
-      const records = parseCsv(file);
+      const csv = parseCsv(file);
       const id = randomUUID();
       const objectKey = `imports/${id}.csv`;
       await store.put(objectKey, file, "text/csv");
@@ -132,16 +159,15 @@ export function createImportsService(deps: { db: Database; store: ObjectStore; q
         userId: scope.userId,
         filename: safeName,
         objectKey,
-        rowsTotal: records.length - 1,
+        rowsTotal: csv.rows.length,
       });
-      const headers = records[0] ?? [];
       return {
         id,
         filename: safeName,
-        headers,
-        sampleRows: records.slice(1, 21),
-        rowsTotal: records.length - 1,
-        suggestedMap: suggestColumnMap(headers),
+        headers: csv.headers,
+        sampleRows: csv.rows.slice(0, 20).map((row) => row.record),
+        rowsTotal: csv.rows.length,
+        suggestedMap: suggestColumnMap(csv.headers),
       };
     },
 
@@ -153,10 +179,12 @@ export function createImportsService(deps: { db: Database; store: ObjectStore; q
     ): Promise<ImportPreviewResponse> {
       const current = await importsRepo(db).get(scope, id);
       if (current === undefined) throw notFound();
-      if (current.status !== "uploaded" && current.status !== "previewed")
+      if (current.status !== "uploaded" && current.status !== "previewed") {
         throw conflict("already_started", "This import has already run.");
-      if (!Object.values(columnMap).includes("account_name"))
+      }
+      if (!Object.values(columnMap).includes("account_name")) {
         throw unprocessable("no_name_column", "Choose which column holds the account name.");
+      }
       const judged = await judgeRows(db, parseCsv(await store.get(current.objectKey)), columnMap);
       await importsRepo(db).update(scope, id, {
         status: "previewed",
@@ -175,11 +203,26 @@ export function createImportsService(deps: { db: Database; store: ObjectStore; q
     async run(scope: UserScope, id: string, ip: string | null): Promise<ImportStatus> {
       const current = await importsRepo(db).get(scope, id);
       if (current === undefined) throw notFound();
-      if (current.status !== "previewed") throw conflict("not_previewed", "Preview the import before running it.");
-      const updated = await importsRepo(db).update(scope, id, { status: "running" });
-      await auditRepo(db).write(scope, { action: "import.start", entityType: "import", entityId: id, ip });
-      await queue.send(JOBS.importRun, { importId: id });
-      return toStatus(updated ?? current);
+      // One atomic step from previewed (or failed, to resume) to running: two clicks can't start two jobs.
+      const started = await db.transaction(async (tx) => {
+        const row = await importsRepo(tx).transition(scope, id, ["previewed", "failed"], "running");
+        if (row !== undefined)
+          await auditRepo(tx).write(scope, { action: "import.start", entityType: "import", entityId: id, ip });
+        return row;
+      });
+      if (started === undefined) {
+        throw conflict(
+          "not_runnable",
+          current.status === "running" ? "This import is already running." : "Preview the import before running it.",
+        );
+      }
+      try {
+        await queue.send(JOBS.importRun, { importId: id });
+      } catch (error) {
+        await importsRepo(db).transition(scope, id, ["running"], current.status === "failed" ? "failed" : "previewed");
+        throw error;
+      }
+      return toStatus(started);
     },
 
     async status(scope: UserScope, id: string): Promise<ImportStatus> {
@@ -192,7 +235,7 @@ export function createImportsService(deps: { db: Database; store: ObjectStore; q
 
 export type ImportsService = ReturnType<typeof createImportsService>;
 
-/** The import.run job (worker). Each row is its own transaction, so a failure part-way keeps earlier rows. */
+/** The import.run job (worker). Each row is its own transaction; a failed import can be run again and resumes. */
 export async function runImport(
   deps: { db: Database; store: ObjectStore; clock: Clock },
   importId: string,
@@ -214,18 +257,21 @@ export async function runImport(
   const owner = settings.data.assignToMe ? importer.id : null;
 
   try {
-    const records = parseCsv(await store.get(job.objectKey));
-    const judged = await judgeRows(db, records, settings.data.columnMap);
+    const csv = parseCsv(await store.get(job.objectKey));
+    // Resuming after a failure: accounts this import already created count as created, not as duplicates.
+    const earlier = await accountsRepo(db).keysFromSource(system, importId);
+    const judged = await judgeRows(db, csv, settings.data.columnMap, earlier);
     const pricing = await livePricing(db, scope, clock());
     const errors: z.infer<typeof RowError>[] = [];
-    let created = 0;
+    let created = judged.filter((entry) => entry.verdict === "created").length;
 
     for (const entry of judged) {
+      if (entry.verdict === "created") continue;
       if (entry.verdict !== "new") {
         errors.push({ row: entry.row, name: entry.name, reason: entry.reason ?? "" });
         continue;
       }
-      const result = validateImportRow(applyColumnMap(records[entry.row - 1] ?? [], settings.data.columnMap));
+      const result = validateImportRow(applyColumnMap(entry.record, settings.data.columnMap));
       if (!result.ok) continue; // judged as new, so this cannot happen
       const { account: fields, contact, signal } = result.row;
       const inserted = await db.transaction(async (tx) => {
@@ -296,6 +342,8 @@ export async function runImport(
         meta: { created, skipped: errors.length },
       });
     });
+    // The file holds contact details; once imported it is not kept.
+    await store.delete(job.objectKey).catch(() => undefined);
   } catch (error) {
     await importsRepo(db).update(system, importId, {
       status: "failed",
@@ -303,7 +351,10 @@ export async function runImport(
         {
           row: 0,
           name: null,
-          reason: error instanceof Error && error.name === "HttpError" ? error.message : "The import failed.",
+          reason:
+            error instanceof Error && error.name === "HttpError"
+              ? error.message
+              : "The import failed. Run it again to resume.",
         },
       ],
     });

@@ -1,4 +1,5 @@
 import {
+  AssignableUsers,
   Deal,
   DEAL_STAGES,
   DealPage,
@@ -14,9 +15,23 @@ import { Columns, List } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { api } from "../api";
-import { choosableStages, StagePill } from "../deal-ui";
+import { choosableStages, needsOverrideReason, OverrideDialog, StagePill } from "../deal-ui";
 import { useMe } from "../session";
 import { Btn, Empty, ErrorState, Field, inputClass, Loading, Stat } from "../ui";
+
+/** Every deal the filter matches, page by page (at most 2,000). */
+async function allDeals(owner: string) {
+  const items: Deal[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 20; page += 1) {
+    const query: string = cursor === null ? "" : `&cursor=${cursor}`;
+    const result: DealPage = await api(`/api/deals?owner=${owner}&limit=100${query}`, DealPage);
+    items.push(...result.items);
+    cursor = result.nextCursor;
+    if (cursor === null) break;
+  }
+  return items;
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const daysSince = (iso: string) => Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / DAY_MS));
@@ -33,34 +48,43 @@ export function PipelinePage() {
   const isManager = role !== "ae";
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [owner, setOwner] = useState<string>(isManager ? "all" : "me");
+  // Chosen by the user, else a default that waits for the user's role to load.
+  const [ownerChoice, setOwner] = useState<string | null>(null);
+  const owner = ownerChoice ?? (isManager ? "all" : "me");
   const [view, setView] = useState<"board" | "list">("board");
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<DealStage | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [override, setOverride] = useState<{ id: string; stage: DealStage } | null>(null);
 
   const deals = useQuery({
     queryKey: ["deals", owner],
-    queryFn: () => api(`/api/deals?owner=${owner}&limit=100`, DealPage),
+    enabled: me.data !== undefined,
+    queryFn: () => allDeals(owner),
   });
   const forecast = useQuery({
     queryKey: ["forecast", owner],
+    enabled: me.data !== undefined,
     queryFn: () => api(`/api/forecast?owner=${owner}`, ForecastResponse),
   });
-  const everyone = useQuery({
-    queryKey: ["deals", "all-owners"],
+  const people = useQuery({
+    queryKey: ["assignable-users"],
     enabled: isManager,
-    queryFn: () => api("/api/deals?owner=all&limit=100", DealPage),
+    queryFn: () => api("/api/users", AssignableUsers),
   });
-  const owners = [
-    ...new Map((everyone.data?.items ?? []).map((deal) => [deal.owner.id, deal.owner.name])).entries(),
-  ].sort((a, b) => a[1].localeCompare(b[1]));
+  const owners = (people.data?.items ?? []).map((user) => [user.id, user.name] as const);
 
   const move = useMutation({
-    mutationFn: ({ id, stage }: { id: string; stage: DealStage }) =>
-      api(`/api/deals/${id}/stage`, Deal, { method: "POST", body: { stage } }),
+    mutationFn: ({ id, stage, reason }: { id: string; stage: DealStage; reason?: string }) =>
+      api(`/api/deals/${id}/stage`, Deal, {
+        method: "POST",
+        body: { stage, ...(reason === undefined ? {} : { reason }) },
+      }),
     onError: (error) => {
       setNotice(error.message);
+    },
+    onSuccess: () => {
+      setOverride(null);
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: ["deals"] });
@@ -68,20 +92,26 @@ export function PipelinePage() {
     },
   });
 
-  const drop = (stage: DealStage) => {
-    const deal = deals.data?.items.find((item) => item.id === dragging);
-    setDragging(null);
-    setOver(null);
-    if (deal === undefined || deal.stage === stage || deal.status !== "open") return;
+  /** Moves a deal, asking a manager for the reason when the stage is normally set by the system. */
+  const requestMove = (id: string, stage: DealStage) => {
     if (!choosableStages(role).includes(stage)) {
       setNotice(`${STAGE_LABELS[stage]} is set automatically by the e-signature system. A manager can override.`);
       return;
     }
     setNotice(null);
-    move.mutate({ id: deal.id, stage });
+    if (needsOverrideReason(stage)) setOverride({ id, stage });
+    else move.mutate({ id, stage });
   };
 
-  const visible = (deals.data?.items ?? []).filter((deal) => deal.status !== "lost");
+  const drop = (stage: DealStage) => {
+    const deal = deals.data?.find((item) => item.id === dragging);
+    setDragging(null);
+    setOver(null);
+    if (deal === undefined || deal.stage === stage || deal.status !== "open") return;
+    requestMove(deal.id, stage);
+  };
+
+  const visible = (deals.data ?? []).filter((deal) => deal.status !== "lost");
 
   return (
     <div className="space-y-4">
@@ -157,6 +187,19 @@ export function PipelinePage() {
           </Btn>
         </div>
       </div>
+      {forecast.isError && <ErrorState error={forecast.error} onRetry={() => void forecast.refetch()} />}
+      {override !== null && (
+        <OverrideDialog
+          stage={override.stage}
+          busy={move.isPending}
+          onCancel={() => {
+            setOverride(null);
+          }}
+          onConfirm={(reason) => {
+            move.mutate({ ...override, reason });
+          }}
+        />
+      )}
       {notice !== null && (
         <p role="alert" className="rounded-lg border border-amber-900 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
           {notice}
@@ -266,7 +309,7 @@ export function PipelinePage() {
                         className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
                         value={deal.stage}
                         onChange={(event) => {
-                          move.mutate({ id: deal.id, stage: event.target.value as DealStage });
+                          requestMove(deal.id, event.target.value as DealStage);
                         }}
                       >
                         {[...new Set([deal.stage, ...choosableStages(role)])].map((stage) => (

@@ -54,6 +54,18 @@ describe("fitScore", () => {
     },
   );
 
+  it("ignores future-dated incidents, 'Cameras plus …' and unreachable primary contacts", () => {
+    expect(fitScore(base({ signals: [incident("2026-04-01")] }), SEED_PRICING, NOW).score).toBe(0);
+    expect(fitScore(base({ currentProvider: "Cameras + Allied guards" }), SEED_PRICING, NOW).score).toBe(0);
+    expect(
+      fitScore(
+        base({ contacts: [{ isPrimary: true, email: "a@b.example", emailStatus: "bounced" }] }),
+        SEED_PRICING,
+        NOW,
+      ).score,
+    ).toBe(0);
+  });
+
   it("does not add +20 for a professional provider or an unknown one", () => {
     expect(fitScore(base({ currentProvider: "Regional guard company" }), SEED_PRICING, NOW).score).toBe(0);
     expect(fitScore(base({ currentProvider: null }), SEED_PRICING, NOW).score).toBe(0);

@@ -9,7 +9,7 @@ export interface FitInput {
   /** "YYYY-MM-DD" */
   contractEndDate: string | null;
   signals: readonly { kind: string; confirmed: boolean; observedOn: string | null; createdAt: Date }[];
-  contacts: readonly { isPrimary: boolean; email: string | null }[];
+  contacts: readonly { isPrimary: boolean; email: string | null; emailStatus?: string }[];
 }
 
 export interface FitResult {
@@ -34,7 +34,7 @@ export function fitScore(input: FitInput, pricing: PricingConfig | null, now: Da
   const recentIncident = input.signals.some((signal) => {
     if (signal.kind !== "incident" || !signal.confirmed) return false;
     const seen = signal.observedOn === null ? signal.createdAt.getTime() : Date.parse(`${signal.observedOn}T00:00:00Z`);
-    return now.getTime() - seen <= 180 * DAY_MS;
+    return seen <= now.getTime() && now.getTime() - seen <= 180 * DAY_MS;
   });
   if (recentIncident) {
     score += 30;
@@ -49,7 +49,10 @@ export function fitScore(input: FitInput, pricing: PricingConfig | null, now: Da
     }
   }
 
-  if (/^\s*(none|in-house|in house|cameras)/i.test(input.currentProvider ?? "")) {
+  if (
+    /^\s*(none|in-house|in house|cameras only|cameras)\s*$/i.test(input.currentProvider ?? "") ||
+    /^\s*(none|in-house|in house)\b/i.test(input.currentProvider ?? "")
+  ) {
     score += 20;
     reasons.push("No professional guard service today");
   }
@@ -62,7 +65,9 @@ export function fitScore(input: FitInput, pricing: PricingConfig | null, now: Da
     reasons.push("Large contract value");
   }
 
-  if (input.contacts.some((contact) => contact.isPrimary && contact.email !== null && contact.email !== "")) {
+  const reachable = (contact: FitInput["contacts"][number]) =>
+    contact.isPrimary && contact.email !== null && contact.email !== "" && (contact.emailStatus ?? "ok") === "ok";
+  if (input.contacts.some(reachable)) {
     score += 10;
     reasons.push("Decision maker with email");
   }

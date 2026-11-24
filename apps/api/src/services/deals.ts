@@ -1,4 +1,4 @@
-import type { Database } from "@soa/db";
+import type { Database, Executor } from "@soa/db";
 import {
   checkManualMove,
   DEAL_STAGES,
@@ -33,13 +33,13 @@ const decodeOffset = (cursor: string | undefined) => {
 };
 
 export function createDealsService({ db, clock }: { db: Database; clock: Clock }) {
-  const valueOf = async (scope: UserScope, pkg: Package): Promise<number> => {
-    const pricing = await livePricing(db, scope, clock());
+  const valueOf = async (scope: UserScope, pkg: Package, executor: Executor = db): Promise<number> => {
+    const pricing = await livePricing(executor, scope, clock());
     return pricing === null ? 0 : priceBreakdown(pkg, pricing).annualCents;
   };
 
-  const editableOrError = async (scope: UserScope, id: string) => {
-    const repo = dealsRepo(db);
+  const editableOrError = async (scope: UserScope, id: string, executor: Executor = db) => {
+    const repo = dealsRepo(executor);
     const deal = await repo.getEditable(scope, id);
     if (deal !== undefined) return deal;
     if ((await repo.get(scope, id)) !== undefined) throw forbidden("Only the deal's owner or a manager can change it.");
@@ -134,21 +134,38 @@ export function createDealsService({ db, clock }: { db: Database; clock: Clock }
       return service.get(scope, id);
     },
 
-    async update(scope: UserScope, id: string, patch: DealPatch): Promise<Deal> {
-      await editableOrError(scope, id);
-      const values: Record<string, unknown> = {};
-      if (patch.name !== undefined) values.name = patch.name;
-      if (patch.expectedClose !== undefined) values.expectedClose = patch.expectedClose;
-      if (patch.package !== undefined) {
-        values.package = patch.package;
-        values.annualValueCents = await valueOf(scope, patch.package);
-      }
-      await dealsRepo(db).update(scope, id, values);
+    async update(scope: UserScope, id: string, patch: DealPatch, ip: string | null = null): Promise<Deal> {
+      await db.transaction(async (tx) => {
+        const deal = await editableOrError(scope, id, tx);
+        if (deal.status !== "open") throw unprocessable("not_open", "Only open deals can be changed.");
+        const values: Record<string, unknown> = {};
+        if (patch.name !== undefined) values.name = patch.name;
+        if (patch.expectedClose !== undefined) values.expectedClose = patch.expectedClose;
+        if (patch.package !== undefined) {
+          values.package = patch.package;
+          values.annualValueCents = await valueOf(scope, patch.package, tx);
+        }
+        await dealsRepo(tx).update(scope, id, values);
+        const meta = {
+          fields: Object.keys(patch).sort(),
+          ...(values.annualValueCents === undefined
+            ? {}
+            : { fromCents: deal.annualValueCents, toCents: values.annualValueCents }),
+        };
+        await activitiesRepo(tx).insert(scope, {
+          accountId: deal.accountId,
+          dealId: id,
+          type: "note",
+          subject: "Deal updated",
+          meta,
+        });
+        await auditRepo(tx).write(scope, { action: "deal.update", entityType: "deal", entityId: id, meta, ip });
+      });
       return service.get(scope, id);
     },
 
     /** Manual stage move (§5): AEs up to proposal; contract_sent and won are the system's (a manager can override). */
-    async moveStage(scope: UserScope, id: string, to: DealStage, ip: string | null): Promise<Deal> {
+    async moveStage(scope: UserScope, id: string, to: DealStage, ip: string | null, reason?: string): Promise<Deal> {
       await db.transaction(async (tx) => {
         const repo = dealsRepo(tx);
         const deal = await repo.getEditable(scope, id);
@@ -159,6 +176,11 @@ export function createDealsService({ db, clock }: { db: Database; clock: Clock }
         }
         const check = checkManualMove({ role: scope.role, status: deal.status, from: deal.stage, to });
         if (!check.ok) throw unprocessable(check.code, check.message);
+        const override = stageIndex(to) > stageIndex("proposal");
+        // §5: a manager can set Contract sent or Won by hand, with a reason (audited).
+        if (override && (reason === undefined || reason.trim() === "")) {
+          throw unprocessable("reason_required", "Give a reason when setting this stage by hand.");
+        }
         const now = clock();
         await repo.update(scope, id, {
           stage: to,
@@ -167,19 +189,18 @@ export function createDealsService({ db, clock }: { db: Database; clock: Clock }
           lastActivityAt: now,
         });
         await repo.recordStage(scope, id, deal.stage, to);
-        const override = stageIndex(to) > stageIndex("proposal");
         await activitiesRepo(tx).insert(scope, {
           accountId: deal.accountId,
           dealId: id,
           type: "stage_change",
           subject: `Stage moved from ${STAGE_LABELS[deal.stage]} to ${STAGE_LABELS[to]}`,
-          meta: { from: deal.stage, to, manual: true, ...(override ? { managerOverride: true } : {}) },
+          meta: { from: deal.stage, to, manual: true, ...(override ? { managerOverride: true, reason } : {}) },
         });
         await auditRepo(tx).write(scope, {
           action: "deal.stage",
           entityType: "deal",
           entityId: id,
-          meta: { from: deal.stage, to, manual: true, ...(override ? { managerOverride: true } : {}) },
+          meta: { from: deal.stage, to, manual: true, ...(override ? { managerOverride: true, reason } : {}) },
           ip,
         });
       });

@@ -63,7 +63,7 @@ export function createExportService({ db }: { db: Database }) {
           ownerName,
           STAGE_LABELS[deal.stage],
           deal.status,
-          (deal.annualValueCents / 100).toFixed(2),
+          `${String(Math.trunc(deal.annualValueCents / 100))}.${String(deal.annualValueCents % 100).padStart(2, "0")}`,
           deal.expectedClose,
           deal.lostReason,
         ]),

@@ -73,7 +73,26 @@ export const ContactInput = z
   })
   .strict();
 export type ContactInput = z.infer<typeof ContactInput>;
-export const ContactPatch = ContactInput.partial().strict();
+/** No defaults here: a field that is left out must stay as it is (a default would overwrite it). */
+export const ContactPatch = z
+  .object({
+    firstName: text(100),
+    lastName: z.string().trim().max(100),
+    title: optionalText(200),
+    email: z
+      .email()
+      .toLowerCase()
+      .nullable()
+      .or(z.literal("").transform(() => null)),
+    phone: optionalText(40),
+    phoneType: z.enum(["business", "mobile", "unknown"]),
+    linkedinUrl: optionalText(300),
+    contactPref: optionalText(300),
+    isPrimary: z.boolean(),
+    doNotCall: z.boolean(),
+  })
+  .partial()
+  .strict();
 export type ContactPatch = z.infer<typeof ContactPatch>;
 
 // ───────── signals ─────────
@@ -126,7 +145,9 @@ export const DealPatch = z
   .partial()
   .strict();
 export type DealPatch = z.infer<typeof DealPatch>;
-export const StageMoveRequest = z.object({ stage: DealStageSchema }).strict();
+export const StageMoveRequest = z
+  .object({ stage: DealStageSchema, reason: z.string().trim().max(300).optional() })
+  .strict();
 export const LoseRequest = z.object({ reason: LostReasonSchema, note: z.string().trim().max(500).optional() }).strict();
 export const CreateDealRequest = z
   .object({ name: text(200).optional(), package: Package.optional(), expectedClose: isoDate.nullable().optional() })

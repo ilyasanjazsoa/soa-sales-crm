@@ -2,7 +2,7 @@ import { tables, type Executor } from "@soa/db";
 import type { DealStage, DealStatus } from "@soa/shared";
 import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { actorId, type Scope } from "./scope";
-import { accountVisible, dealEditable } from "./visibility";
+import { accountEditable, accountVisible, dealEditable } from "./visibility";
 
 const { deals, accounts, users, dealStageHistory } = tables;
 
@@ -17,6 +17,10 @@ export interface DealFilter {
 }
 
 const dealSelect = { deal: deals, accountName: accounts.name, ownerName: users.name };
+
+/** The deal's account is one the scope may edit (used in UPDATE ... WHERE, which can't join). */
+const accountScoped = (scope: Scope) =>
+  sql`EXISTS (SELECT 1 FROM ${accounts} WHERE ${accounts.id} = ${deals.accountId} AND ${accountEditable(scope)})`;
 
 export function dealsRepo(db: Executor) {
   const base = () =>
@@ -99,11 +103,11 @@ export function dealsRepo(db: Executor) {
     },
 
     /** Moves the account's open deals to a new owner (on claim or reassignment). */
-    async reassignOpen(_scope: Scope, accountId: string, ownerUserId: string): Promise<DealRow[]> {
+    async reassignOpen(scope: Scope, accountId: string, ownerUserId: string): Promise<DealRow[]> {
       return db
         .update(deals)
         .set({ ownerUserId, updatedAt: sql`now()` })
-        .where(and(eq(deals.accountId, accountId), eq(deals.status, "open")))
+        .where(and(eq(deals.accountId, accountId), eq(deals.status, "open"), accountScoped(scope)))
         .returning();
     },
 
@@ -111,11 +115,11 @@ export function dealsRepo(db: Executor) {
       await db.insert(dealStageHistory).values({ dealId, fromStage: from, toStage: to, changedBy: actorId(scope) });
     },
 
-    async touch(_scope: Scope, accountId: string): Promise<void> {
+    async touch(scope: Scope, accountId: string): Promise<void> {
       await db
         .update(deals)
         .set({ lastActivityAt: sql`now()` })
-        .where(and(eq(deals.accountId, accountId), eq(deals.status, "open")));
+        .where(and(eq(deals.accountId, accountId), eq(deals.status, "open"), accountScoped(scope)));
     },
 
     async listForExport(scope: Scope) {

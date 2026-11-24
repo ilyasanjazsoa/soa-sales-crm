@@ -147,11 +147,7 @@ const ROUTES: Record<string, RouteCase> = {
   "POST /api/accounts/:id/claim": {
     access: "session",
     path: (ctx) => `/api/accounts/${ctx.ae1AccountId}/claim`,
-    // Claims are the one exception to 404: an owned account answers 409 (acceptance: "a second claim returns 409").
-    asOtherAe: (response, ctx) => {
-      expect(response.statusCode).toBe(409);
-      expectNoLeak(response, ctx);
-    },
+    asOtherAe: expectNotFound,
   },
   "POST /api/accounts/:id/assign": {
     access: "manager",
@@ -392,6 +388,43 @@ describe("route authorization (every /api route)", () => {
         throw new Error(`${key} → ${String(response.statusCode)} ${response.body.slice(0, 200)}`, { cause: error });
       }
     }
+    // Filters pointed at the first AE's data return nothing of it (a fresh session: the loop ended with sign-out).
+    const again = await signIn(app, ctx.ae2.email);
+    for (const url of [
+      `/api/accounts?owner=${ctx.ae1.id}`,
+      `/api/deals?owner=${ctx.ae1.id}`,
+      `/api/forecast?owner=${ctx.ae1.id}`,
+      `/api/tasks?accountId=${ctx.ae1AccountId}`,
+      `/api/accounts?q=${encodeURIComponent(AE1_ACCOUNT_NAME)}`,
+    ]) {
+      const response = await app.inject({ method: "GET", url, cookies: again.cookies });
+      try {
+        expectNothingOf(response, ctx);
+      } catch (error) {
+        throw new Error(`${url} → ${response.body.slice(0, 200)}`, { cause: error });
+      }
+    }
+    // Nothing of the first AE's was changed by any of those requests.
+    const [after] = await ownerQuery<Record<string, unknown>>(
+      `SELECT a.name, a.owner_user_id, a.deleted_at, c.first_name, s.text, s.confirmed, d.name AS deal_name, d.stage,
+              d.status, t.done_at, (SELECT count(*) FROM activities WHERE account_id = a.id) AS activities
+       FROM accounts a, contacts c, signals s, deals d, tasks t
+       WHERE a.id = $1 AND c.id = $2 AND s.id = $3 AND d.id = $4 AND t.id = $5`,
+      [ctx.ae1AccountId, ctx.ae1ContactId, ctx.ae1SignalId, ctx.ae1DealId, ctx.ae1TaskId],
+    );
+    expect(after).toEqual({
+      name: AE1_ACCOUNT_NAME,
+      owner_user_id: ctx.ae1.id,
+      deleted_at: null,
+      first_name: "Pat",
+      text: "Gate broken",
+      confirmed: false,
+      deal_name: "First deal",
+      stage: "lead",
+      status: "open",
+      done_at: null,
+      activities: "0",
+    });
     // The first AE is untouched: still signed in and still active.
     const me = await app.inject({ method: "GET", url: "/api/me", cookies: ae1Session.cookies });
     expect(me.statusCode).toBe(200);

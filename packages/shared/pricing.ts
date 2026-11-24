@@ -45,18 +45,24 @@ export interface PriceBreakdown {
   monthlyCents: number;
 }
 
-/** Multiplies by a decimal rate without binary floating-point drift (rates have at most 4 decimal places). */
-const times = (value: number, rate: number) => (value * Math.round(rate * 10_000)) / 10_000;
+/** A decimal rate (at most 4 places) in basis points. */
+const bp = (rate: number) => BigInt(Math.round(rate * 10_000));
+
+/** value × rate, rounded half up to a whole number, in exact integer arithmetic. */
+const timesRounded = (value: number, rate: number) => Number((BigInt(value) * bp(rate) + 5_000n) / 10_000n);
 
 export function priceBreakdown(pkg: Package, config: PricingConfig, manualDiscount = 0): PriceBreakdown {
   if (manualDiscount < 0 || manualDiscount >= 1) throw new RangeError("manualDiscount must be in [0, 1)");
   const hoursPerWeek = pkg.posts * config.coverageHoursPerWeek[pkg.coverage];
   const baseRate = config.hourlyRateCents[pkg.armed ? "armed" : "unarmed"];
-  const hourlyRateCents = Math.round(pkg.supervisor ? times(baseRate, config.supervisorMultiplier) : baseRate);
+  const hourlyRateCents = pkg.supervisor ? timesRounded(baseRate, config.supervisorMultiplier) : baseRate;
   const addonsMonthlyCents = pkg.addons.reduce((sum, addon) => sum + config.addons[addon].monthlyCents, 0);
   const termDiscount = config.termDiscounts[String(pkg.termMonths)] ?? 0;
   const gross = hoursPerWeek * hourlyRateCents * 52 + addonsMonthlyCents * 12;
-  const annualCents = Math.round(times(times(gross, 1 - termDiscount), 1 - manualDiscount));
+  // gross × (1 − term) × (1 − manual), rounded once, half up, with no floating-point intermediate.
+  const annualCents = Number(
+    (BigInt(gross) * (10_000n - bp(termDiscount)) * (10_000n - bp(manualDiscount)) + 50_000_000n) / 100_000_000n,
+  );
   return {
     pricingConfigId: config.id,
     hoursPerWeek,
@@ -65,7 +71,7 @@ export function priceBreakdown(pkg: Package, config: PricingConfig, manualDiscou
     termDiscount,
     manualDiscount,
     annualCents,
-    monthlyCents: Math.round(annualCents / 12),
+    monthlyCents: Number((BigInt(annualCents) * 2n + 12n) / 24n), // annual / 12, rounded half up
   };
 }
 

@@ -62,7 +62,11 @@ export async function seedDatabase(
             })),
           contacts: data.contacts
             .filter((contact) => contact.accountId === account.id)
-            .map((contact) => ({ isPrimary: contact.isPrimary ?? false, email: contact.email ?? null })),
+            .map((contact) => ({
+              isPrimary: contact.isPrimary ?? false,
+              email: contact.email ?? null,
+              emailStatus: "ok",
+            })),
         },
         pricing,
         now,

@@ -1,7 +1,7 @@
 import { tables, type Executor } from "@soa/db";
-import { and, asc, desc, eq, inArray, isNull, lt, lte, ne, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { actorId, seesEverything, type Scope, type SystemScope, type UserScope } from "./scope";
-import { accountEditable, accountVisible, allOf, anyOf } from "./visibility";
+import { accountEditable, accountVisible, anyOf } from "./visibility";
 
 /* Rows that belong to an account. Each one is visible exactly when its account is (ARCHITECTURE.md §4). */
 
@@ -171,14 +171,13 @@ export function activitiesRepo(db: Executor) {
     },
 
     /** Newest first; cursor is "<iso time>|<id>" of the last item. */
-    async timeline(scope: Scope, accountId: string, before: { at: Date; id: string } | undefined, limit: number) {
+    /** Newest first. `afterId` is the last activity of the previous page; the database compares its full-precision
+        timestamp, so rows sharing a millisecond are never skipped. */
+    async timeline(scope: Scope, accountId: string, afterId: string | undefined, limit: number) {
       const conditions: SQL[] = [eq(activities.accountId, accountId), accountVisible(scope)];
-      if (before !== undefined) {
+      if (afterId !== undefined) {
         conditions.push(
-          anyOf(
-            lt(activities.occurredAt, before.at),
-            allOf(eq(activities.occurredAt, before.at), lt(activities.id, before.id)),
-          ),
+          sql`(${activities.occurredAt}, ${activities.id}) < (SELECT c.occurred_at, c.id FROM ${activities} c WHERE c.id = ${afterId} AND c.account_id = ${accountId})`,
         );
       }
       return db
@@ -293,6 +292,16 @@ export function importsRepo(db: Executor) {
         .where(and(eq(imports.id, id), visible(scope)));
       return row;
     },
+    /** Moves the import from one of `from` to `to` in one statement; undefined if it was in another status. */
+    async transition(scope: Scope, id: string, from: string[], to: string): Promise<ImportRow | undefined> {
+      const [row] = await db
+        .update(imports)
+        .set({ status: to })
+        .where(and(eq(imports.id, id), visible(scope), inArray(imports.status, from)))
+        .returning();
+      return row;
+    },
+
     async update(
       scope: Scope | SystemScope,
       id: string,

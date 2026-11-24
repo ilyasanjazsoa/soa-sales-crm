@@ -34,5 +34,6 @@ export function accountEditable(scope: Scope): SQL {
 /** Deals the scope may change: managers any, AEs only deals they own on accounts they can see. */
 export function dealEditable(scope: Scope): SQL {
   if (scope.kind === "system" || scope.role !== "ae") return isNull(accounts.deletedAt);
-  return allOf(accountVisible(scope), eq(deals.ownerUserId, scope.userId));
+  // An AE changes a deal only while it is theirs and so is the account (not after it went back to the pool).
+  return allOf(accountEditable(scope), eq(deals.ownerUserId, scope.userId));
 }
