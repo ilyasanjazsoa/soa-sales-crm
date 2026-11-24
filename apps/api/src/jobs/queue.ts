@@ -35,11 +35,26 @@ export const JOB_OPTIONS: Record<JobName, { retryLimit: number; retryBackoff?: b
   "mail.sync": { retryLimit: 0 },
 };
 
-export async function createPgBossQueue(databaseUrl: string): Promise<JobQueue & { boss: PgBoss }> {
-  const boss = new PgBoss({ connectionString: databaseUrl, supervise: false, schedule: false });
+/** Syncs are per user and disposable: "stately" keeps at most one queued and one running job per user. */
+const SYNC_QUEUES = new Set<string>(["mail.sync", "calendar.sync"]);
+
+/** The api only sends; the worker passes `supervise: true` so jobs whose worker died are expired and retried. */
+export async function createPgBossQueue(
+  databaseUrl: string,
+  options: { supervise?: boolean } = {},
+): Promise<JobQueue & { boss: PgBoss }> {
+  const boss = new PgBoss({ connectionString: databaseUrl, supervise: options.supervise ?? false, schedule: false });
   boss.on("error", () => undefined); // surfaced through failed sends
   await boss.start();
-  for (const name of Object.values(JOBS)) await boss.createQueue(name, JOB_OPTIONS[name]);
+  for (const name of Object.values(JOBS)) {
+    const policy = SYNC_QUEUES.has(name) ? "stately" : "standard";
+    const existing = await boss.getQueue(name);
+    // Sync jobs are disposable, so a queue made with the old policy is replaced.
+    if (existing?.policy !== policy) {
+      if (existing !== null && SYNC_QUEUES.has(name)) await boss.deleteQueue(name);
+      if (existing === null || SYNC_QUEUES.has(name)) await boss.createQueue(name, { ...JOB_OPTIONS[name], policy });
+    }
+  }
   return {
     boss,
     async send(name, data) {

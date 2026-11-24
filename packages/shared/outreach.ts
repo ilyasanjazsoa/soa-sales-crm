@@ -237,7 +237,7 @@ export const LogOutcomeRequest = z
   })
   .strict();
 
-export const SendResult = z.object({ messageId: z.uuid(), status: z.literal("queued") });
+export const SendResult = z.object({ messageId: z.uuid(), status: z.enum(["queued", "failed"]) });
 
 export const EmailMessage = z.object({
   id: z.uuid(),

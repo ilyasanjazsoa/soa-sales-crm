@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import nodemailer from "nodemailer";
 import { z } from "zod";
-import { looksLikeBounce, MailAuthError, MailPermanentError, type InboundMail, type MailProvider } from "./types";
+import { createFakeTokenRefresher } from "../identity/refresh";
+import { looksLikeBounce, MailPermanentError, MailRetryableError, type InboundMail, type MailProvider } from "./types";
 
 /* FAKE_PROVIDERS mail: delivers over SMTP to Mailpit (docker compose) and reads replies back through Mailpit's API.
    Nothing leaves the machine. A reply is simulated by sending a message to the rep that has In-Reply-To set. */
@@ -23,6 +24,7 @@ const Headers = z.record(z.string(), z.array(z.string()));
 const bracket = (id: string) => (id.startsWith("<") ? id : `<${id}>`);
 
 export function createMailpitMailProvider(options: { smtpUrl?: string; apiUrl?: string } = {}): MailProvider {
+  const fakeTokens = createFakeTokenRefresher();
   const smtp = new URL((options.smtpUrl ?? "smtp://127.0.0.1:1025").replace(/^smtp:/, "http:"));
   const api = (options.apiUrl ?? "http://127.0.0.1:8025").replace(/\/$/, "");
   const transport = nodemailer.createTransport({
@@ -55,7 +57,8 @@ export function createMailpitMailProvider(options: { smtpUrl?: string; apiUrl?: 
         const code = (error as { responseCode?: unknown }).responseCode;
         if (typeof code === "number" && code >= 500)
           throw new MailPermanentError("The mail server rejected the message");
-        throw error;
+        // A temporary refusal (4xx) or no connection: SMTP accepted nothing, so a retry can't send twice.
+        throw new MailRetryableError("The mail server could not be reached");
       }
       return { providerMessageId: messageId, providerThreadId: messageId };
     },
@@ -86,14 +89,6 @@ export function createMailpitMailProvider(options: { smtpUrl?: string; apiUrl?: 
       return { messages, cursor: new Date(newest).toISOString() };
     },
 
-    refresh(refreshToken) {
-      // The fake sign-in issues "fake-refresh-…" tokens; anything else (e.g. a revoked marker) fails like Graph would.
-      if (!refreshToken.startsWith("fake-refresh-")) return Promise.reject(new MailAuthError());
-      return Promise.resolve({
-        accessToken: `fake-access-${randomUUID()}`,
-        refreshToken,
-        expiresAt: new Date(Date.now() + 3600_000),
-      });
-    },
+    refresh: (refreshToken) => fakeTokens.refresh(refreshToken),
   };
 }

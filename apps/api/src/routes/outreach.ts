@@ -35,6 +35,9 @@ export function registerOutreachRoutes(app: FastifyInstance, deps: { outreach: O
   app.patch("/api/drafts/:id", session, async (request) =>
     outreach.updateDraft(sessionOf(request).scope, id(request.params), DraftPatch.parse(request.body)),
   );
+  app.post("/api/drafts/:id/claims", session, async (request) =>
+    outreach.checkClaims(sessionOf(request).scope, id(request.params)),
+  );
   app.post("/api/drafts/:id/regenerate", session, async (request) =>
     outreach.regenerate(sessionOf(request).scope, id(request.params)),
   );
@@ -95,7 +98,7 @@ function page(reply: FastifyReply, status: number, title: string, body: string) 
   return reply
     .code(status)
     .header("content-type", "text/html; charset=utf-8")
-    .header("content-security-policy", PAGE_CSP ?? "")
+    .header("content-security-policy", PAGE_CSP ?? SECURITY_HEADERS["content-security-policy"] ?? "default-src 'none'")
     .header("cache-control", "no-store")
     .header("referrer-policy", "no-referrer")
     .send(

@@ -37,6 +37,8 @@ export interface MailTokens {
 
 export interface MailProvider {
   readonly provider: "microsoft" | "google";
+  /** Throws MailRetryableError when nothing was sent, MailPermanentError when it never can be, MailAuthError when
+      the rep must reconnect. Any other error means delivery is unknown: the caller must not retry automatically. */
   send: (accessToken: string, mail: OutgoingMail) => Promise<SentMail>;
   /** Messages that arrived since the cursor (null: start from now). Returns the next cursor. */
   listNew: (accessToken: string, cursor: string | null) => Promise<{ messages: InboundMail[]; cursor: string }>;
@@ -48,6 +50,22 @@ export class MailPermanentError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "MailPermanentError";
+  }
+}
+
+/** The provider definitely did not accept the message (it can be retried without risk of a second copy). */
+export class MailRetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MailRetryableError";
+  }
+}
+
+/** The sync cursor is no longer valid; start again from now. */
+export class MailCursorExpired extends Error {
+  constructor() {
+    super("The mail sync cursor expired.");
+    this.name = "MailCursorExpired";
   }
 }
 

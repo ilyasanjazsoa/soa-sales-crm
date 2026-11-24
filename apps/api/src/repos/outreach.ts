@@ -1,5 +1,5 @@
 import { tables, type Executor } from "@soa/db";
-import { and, count, desc, eq, gte, isNotNull, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { accountEditable, accountVisible } from "./visibility";
 import { seesEverything, type Scope, type SystemScope, type UserScope } from "./scope";
 
@@ -139,10 +139,43 @@ export function emailsRepo(db: Executor) {
             eq(emailMessages.status, "queued"),
             eq(emailMessages.direction, "out"),
             isNotNull(emailMessages.draftId),
+            isNull(emailMessages.sentAt), // sent_at on a queued row = a send attempt has started (the claim)
           ),
         )
         .for("update", { skipLocked: true });
       return row;
+    },
+
+    /** Queued messages a worker never finished: claimed long ago (delivery unknown) or never picked up. */
+    async stuck(_scope: SystemScope, claimedBefore: Date, queuedBefore: Date) {
+      return db
+        .select({ id: emailMessages.id, claimed: sql<boolean>`${emailMessages.sentAt} IS NOT NULL` })
+        .from(emailMessages)
+        .where(
+          and(
+            eq(emailMessages.status, "queued"),
+            eq(emailMessages.direction, "out"),
+            sql`((${emailMessages.sentAt} IS NOT NULL AND ${emailMessages.sentAt} < ${claimedBefore}) OR (${emailMessages.sentAt} IS NULL AND ${emailMessages.createdAt} < ${queuedBefore}))`,
+          ),
+        )
+        .limit(200);
+    },
+
+    /** Recent replies the AI couldn't classify yet, to try again. */
+    async unclassified(_scope: SystemScope, userId: string, since: Date) {
+      return db
+        .select()
+        .from(emailMessages)
+        .where(
+          and(
+            eq(emailMessages.userId, userId),
+            eq(emailMessages.direction, "in"),
+            eq(emailMessages.status, "received"),
+            isNull(emailMessages.aiClassification),
+            gte(emailMessages.createdAt, since),
+          ),
+        )
+        .limit(20);
     },
 
     async update(_scope: Scope, id: string, values: Partial<typeof emailMessages.$inferInsert>): Promise<void> {
@@ -192,9 +225,10 @@ export function suppressionListRepo(db: Executor) {
 
     /** Adds the address; true when it was not on the list before. */
     async add(
-      _scope: Scope,
+      scope: Scope,
       values: { email: string; reason: SuppressionRow["reason"]; note?: string | null; createdBy: string | null },
     ): Promise<boolean> {
+      if (scope.kind === "user" && scope.role === "ae") throw new Error("only managers add addresses by hand");
       const rows = await db
         .insert(suppressions)
         .values({ ...values, email: values.email.toLowerCase() })
@@ -203,7 +237,9 @@ export function suppressionListRepo(db: Executor) {
       return rows.length > 0;
     },
 
-    async remove(_scope: UserScope, email: string): Promise<boolean> {
+    /** Allowing email to an address again is a manager's decision (rule 7). */
+    async remove(scope: UserScope, email: string): Promise<boolean> {
+      if (scope.role === "ae") throw new Error("only managers remove suppressions");
       const rows = await db
         .delete(suppressions)
         .where(eq(suppressions.email, email.toLowerCase()))
@@ -226,6 +262,19 @@ export function contactEmailRepo(db: Executor) {
         .set({ emailStatus: status, updatedAt: sql`now()` })
         .where(eq(contacts.email, email.toLowerCase()))
         .returning({ id: contacts.id, accountId: contacts.accountId });
+    },
+
+    async get(_scope: SystemScope, contactId: string) {
+      const [row] = await db
+        .select({
+          email: contacts.email,
+          emailStatus: contacts.emailStatus,
+          firstName: contacts.firstName,
+          lastName: contacts.lastName,
+        })
+        .from(contacts)
+        .where(eq(contacts.id, contactId));
+      return row;
     },
 
     async name(_scope: SystemScope, contactId: string | null): Promise<string | undefined> {
