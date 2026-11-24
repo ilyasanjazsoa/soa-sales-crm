@@ -1,3 +1,4 @@
+import { zonedTime } from "@soa/shared";
 import { z } from "zod";
 import { MailAuthError } from "../mail/types";
 import type { CalendarEvent, CalendarProvider } from "./types";
@@ -13,16 +14,22 @@ const GraphEvent = z.object({
   end: GraphTime,
   location: z.object({ displayName: z.string().nullable().optional() }).nullable().optional(),
   isCancelled: z.boolean().optional(),
+  isAllDay: z.boolean().optional(),
   showAs: z.string().optional(),
 });
 const EventPage = z.object({ value: z.array(GraphEvent), "@odata.nextLink": z.string().optional() });
 
 const utc = (value: string) => new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
-const toEvent = (event: z.infer<typeof GraphEvent>): CalendarEvent => ({
+/** All-day events are floating dates: they cover the rep's local days, whatever zone Graph reports them in. */
+const localMidnight = (value: string, timeZone: string) => {
+  const [y = 0, m = 1, d = 1] = value.slice(0, 10).split("-").map(Number);
+  return zonedTime(y, m, d, 0, 0, timeZone);
+};
+const toEvent = (event: z.infer<typeof GraphEvent>, timeZone: string): CalendarEvent => ({
   id: event.id,
   title: event.subject ?? "",
-  start: utc(event.start.dateTime),
-  end: utc(event.end.dateTime),
+  start: event.isAllDay === true ? localMidnight(event.start.dateTime, timeZone) : utc(event.start.dateTime),
+  end: event.isAllDay === true ? localMidnight(event.end.dateTime, timeZone) : utc(event.end.dateTime),
   location: event.location?.displayName === "" ? null : (event.location?.displayName ?? null),
   cancelled: event.isCancelled === true,
 });
@@ -40,7 +47,8 @@ export function createGraphCalendarProvider(options: { fetch?: typeof fetch } = 
         prefer: 'outlook.timezone="UTC"',
       },
     });
-    if (response.status === 401) throw new MailAuthError();
+    // 401: token no longer valid; 403: the calendar permission was removed. Both need the rep to reconnect.
+    if (response.status === 401 || response.status === 403) throw new MailAuthError();
     return response;
   };
   const ok = (response: Response) => {
@@ -50,12 +58,13 @@ export function createGraphCalendarProvider(options: { fetch?: typeof fetch } = 
 
   return {
     async listEvents(account, from, to) {
-      const select = "id,subject,start,end,location,isCancelled,showAs";
+      const select = "id,subject,start,end,location,isCancelled,showAs,isAllDay";
+      const zone = account.timeZone ?? "America/Chicago";
       let url = `/me/calendarView?startDateTime=${encodeURIComponent(from.toISOString())}&endDateTime=${encodeURIComponent(to.toISOString())}&$select=${select}&$top=200`;
       const events: CalendarEvent[] = [];
-      for (let page = 0; page < 10; page += 1) {
+      for (let page = 0; page < 50; page += 1) {
         const data = EventPage.parse(await ok(await call(account.accessToken, url)).json());
-        for (const event of data.value) if (event.showAs !== "free") events.push(toEvent(event));
+        for (const event of data.value) if (event.showAs !== "free") events.push(toEvent(event, zone));
         if (data["@odata.nextLink"] === undefined) break;
         url = data["@odata.nextLink"];
       }
@@ -65,7 +74,7 @@ export function createGraphCalendarProvider(options: { fetch?: typeof fetch } = 
     async getEvent(account, id) {
       const response = await call(account.accessToken, `/me/events/${encodeURIComponent(id)}`);
       if (response.status === 404) return null;
-      return toEvent(GraphEvent.parse(await ok(response).json()));
+      return toEvent(GraphEvent.parse(await ok(response).json()), account.timeZone ?? "America/Chicago");
     },
 
     async createEvent(account, event) {

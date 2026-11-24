@@ -61,6 +61,10 @@ export const Meeting = z.object({
 });
 export type Meeting = z.infer<typeof Meeting>;
 
+/** A booking: the meeting, and whether the contact was invited (never when their address can't be emailed). */
+export const BookedMeeting = Meeting.extend({ invited: z.boolean() });
+export type BookedMeeting = z.infer<typeof BookedMeeting>;
+
 /** A block of time from the rep's calendar that is not a CRM meeting. Titles only for the calendar's owner. */
 export const BusyBlock = z.object({ start: timestamp, end: timestamp, title: z.string().nullable() });
 export type BusyBlock = z.infer<typeof BusyBlock>;
@@ -88,6 +92,9 @@ export const MeetingPatch = z
   .strict()
   .refine((patch) => (patch.startsAt === undefined) === (patch.endsAt === undefined), {
     error: "Send both startsAt and endsAt to reschedule.",
+  })
+  .refine((patch) => patch.status === undefined || patch.startsAt === undefined, {
+    error: "Either reschedule or set an outcome, not both.",
   })
   .refine((patch) => patch.status !== undefined || patch.startsAt !== undefined, { error: "Nothing to change." });
 export type MeetingPatch = z.infer<typeof MeetingPatch>;

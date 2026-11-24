@@ -1,4 +1,4 @@
-import { AssignableUsers, MeetingList, MEETING_KIND_LABELS, type Meeting } from "@soa/shared";
+import { AssignableUsers, localParts, MeetingList, MEETING_KIND_LABELS, zonedTime, type Meeting } from "@soa/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
@@ -12,27 +12,29 @@ import { PrepBrief } from "./Meetings";
 /* The Calendar screen (§12): a week of CRM meetings and busy time. Managers can look at a rep's week; the titles of a
    rep's own (non-CRM) events are only ever shown to that rep. */
 
-const startOfWeek = (date: Date) => {
-  const result = new Date(date);
-  result.setHours(0, 0, 0, 0);
-  result.setDate(result.getDate() - ((result.getDay() + 6) % 7)); // Monday
-  return result;
+/** Monday of the week containing `date`, as a calendar date (noon UTC stands for the whole day). */
+const mondayOf = (date: Date, zone: string) => {
+  const p = localParts(date, zone);
+  const day = new Date(Date.UTC(p.year, p.month - 1, p.day, 12));
+  return new Date(day.getTime() - ((day.getUTCDay() + 6) % 7) * 86_400_000);
 };
+const midnight = (day: Date, zone: string) =>
+  zonedTime(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), 0, 0, zone);
 const STATUS_TONE = { scheduled: "blue", done: "green", cancelled: "red", no_show: "red" } as const;
 
 export function CalendarPage() {
   const me = useMe();
-  const [week, setWeek] = useState(() => startOfWeek(new Date()));
+  const zone = me.data?.user.timezone ?? "America/Chicago";
+  // The rep's week, in the rep's time zone, whatever the browser's zone is.
+  const [week, setWeek] = useState(() => mondayOf(new Date(), zone));
   const [owner, setOwner] = useState<string>("");
   const [openPrep, setOpenPrep] = useState<Meeting | null>(null);
   const isManager = me.data?.user.role !== "ae";
-  const zone = me.data?.user.timezone ?? "America/Chicago";
   const time = (iso: string) => timeLabel(iso, zone);
   // Days are the rep's days: an event belongs to the date it starts on in their time zone.
-  const sameDay = (iso: string, day: Date) =>
-    dayKey(iso, zone) === dayKey(new Date(day.getTime() + 12 * 3600_000), zone);
-  const from = week.toISOString();
-  const to = new Date(week.getTime() + 7 * 86_400_000).toISOString();
+  const sameDay = (iso: string, day: Date) => dayKey(iso, zone) === day.toISOString().slice(0, 10);
+  const from = midnight(week, zone).toISOString();
+  const to = midnight(new Date(week.getTime() + 7 * 86_400_000), zone).toISOString();
   const users = useQuery({
     queryKey: ["assignable-users"],
     queryFn: () => api("/api/users", AssignableUsers),
@@ -54,7 +56,7 @@ export function CalendarPage() {
   return (
     <div className="space-y-4">
       <Panel
-        title={`Week of ${week.toLocaleDateString(undefined, { month: "long", day: "numeric" })}`}
+        title={`Week of ${week.toLocaleDateString(undefined, { month: "long", day: "numeric", timeZone: "UTC" })}`}
         icon={Calendar}
         right={
           <>
@@ -89,7 +91,7 @@ export function CalendarPage() {
             <Btn
               small
               onClick={() => {
-                setWeek(startOfWeek(new Date()));
+                setWeek(mondayOf(new Date(), zone));
               }}
             >
               This week
@@ -128,7 +130,12 @@ export function CalendarPage() {
                 return (
                   <section key={dayDate.toISOString()} className="min-w-0 rounded-lg border border-zinc-800 p-2">
                     <h3 className="mb-2 text-xs font-semibold text-zinc-300">
-                      {dayDate.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                      {dayDate.toLocaleDateString(undefined, {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                        timeZone: "UTC",
+                      })}
                     </h3>
                     {items.length === 0 ? (
                       <p className="text-xs text-zinc-600">Free</p>

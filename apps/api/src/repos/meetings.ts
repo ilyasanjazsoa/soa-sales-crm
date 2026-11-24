@@ -3,7 +3,7 @@ import { and, asc, eq, gt, inArray, isNotNull, lt, sql, type SQL } from "drizzle
 import { accountVisible } from "./visibility";
 import { seesEverything, type Scope, type SystemScope, type UserScope } from "./scope";
 
-const { meetings, accounts, users, contacts, aiCalls } = tables;
+const { meetings, accounts, users, contacts, aiCalls, activities } = tables;
 
 export type MeetingRow = typeof meetings.$inferSelect;
 
@@ -109,8 +109,39 @@ export function meetingsRepo(db: Executor) {
         .from(meetings)
         .innerJoin(users, eq(users.id, meetings.ownerUserId))
         .leftJoin(aiCalls, eq(aiCalls.id, meetings.prepAiCallId))
-        .where(and(eq(meetings.status, "scheduled"), gt(meetings.startsAt, from), lt(meetings.startsAt, to)))
+        .where(
+          and(
+            eq(meetings.status, "scheduled"),
+            isNotNull(meetings.accountId),
+            gt(meetings.startsAt, from),
+            lt(meetings.startsAt, to),
+          ),
+        )
         .limit(500);
+    },
+
+    /** Whether a prep brief was already asked for since `since` (one morning attempt per meeting, success or not). */
+    async prepRequestedSince(_scope: SystemScope, meetingId: string, since: Date): Promise<boolean> {
+      const [row] = await db
+        .select({ id: activities.id })
+        .from(activities)
+        .where(
+          and(
+            sql`${activities.meta}->>'job' = 'prep.generate'`,
+            sql`${activities.meta}->>'meetingId' = ${meetingId}`,
+            sql`${activities.meta}->>'state' = 'requested'`,
+            gt(activities.occurredAt, since),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    },
+
+    /** When the prep brief was written (its AI call). */
+    async prepWrittenAt(_scope: Scope, aiCallId: string | null): Promise<Date | null> {
+      if (aiCallId === null) return null;
+      const [row] = await db.select({ at: aiCalls.createdAt }).from(aiCalls).where(eq(aiCalls.id, aiCallId));
+      return row?.at ?? null;
     },
 
     async contactsOf(_scope: Scope, ids: string[]) {

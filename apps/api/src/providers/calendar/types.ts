@@ -4,6 +4,8 @@
 export interface CalendarAccount {
   accessToken: string;
   userId: string;
+  /** The rep's IANA time zone: all-day events are their local days. */
+  timeZone?: string;
 }
 
 export interface CalendarEvent {
