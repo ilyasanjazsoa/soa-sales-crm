@@ -6,7 +6,6 @@ const SECTIONS = [
   { to: "pricing", label: "Pricing" },
   { to: "references", label: "Client references" },
   { to: "suppressions", label: "Suppression list" },
-  { to: "imports", label: "Imports" },
   { to: "audit", label: "Audit log", admin: true },
   { to: "export", label: "Export" },
 ];

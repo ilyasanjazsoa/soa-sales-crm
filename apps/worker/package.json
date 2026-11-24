@@ -11,7 +11,9 @@
   "dependencies": {
     "@soa/shared": "workspace:*",
     "pg-boss": "^11.0.2",
-    "pino": "^9.11.0"
+    "pino": "^9.11.0",
+    "@soa/api": "workspace:*",
+    "@soa/db": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.20.6"

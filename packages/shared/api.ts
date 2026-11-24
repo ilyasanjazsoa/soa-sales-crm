@@ -92,6 +92,9 @@ export const AdminUser = z.object({
 });
 export type AdminUser = z.infer<typeof AdminUser>;
 
+export const AssignableUsers = z.object({ items: z.array(z.object({ id: z.uuid(), name: z.string(), role: Role })) });
+export type AssignableUsers = z.infer<typeof AssignableUsers>;
+
 export const AdminUserList = z.object({ items: z.array(AdminUser) });
 export type AdminUserList = z.infer<typeof AdminUserList>;
 

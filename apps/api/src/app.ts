@@ -1,5 +1,6 @@
 import cookie from "@fastify/cookie";
 import formbody from "@fastify/formbody";
+import multipart from "@fastify/multipart";
 import { APP_ROLE, appRoleProblems, createDb, pingDatabase } from "@soa/db";
 import type { Env } from "@soa/shared";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
@@ -15,6 +16,14 @@ import { registerAuthRoutes } from "./routes/auth";
 import { registerFakeIdpRoutes } from "./routes/fake-idp";
 import { registerHealthRoutes } from "./routes/health";
 import { registerUserRoutes } from "./routes/users";
+import { registerCrmRoutes } from "./routes/crm";
+import { createPgBossQueue, type JobQueue } from "./jobs/queue";
+import { createS3ObjectStore, type ObjectStore } from "./providers/storage";
+import { createAccountsService } from "./services/accounts";
+import { createDealsService } from "./services/deals";
+import { createExportService } from "./services/export";
+import { createImportsService } from "./services/imports";
+import { createTasksService } from "./services/tasks";
 import { RateLimiter, registerSecurityHeaders } from "./security";
 import { createAuditService } from "./services/audit";
 import { createAuthService } from "./services/auth";
@@ -31,6 +40,10 @@ export interface BuildAppOptions {
   rateLimitPerMinute?: number;
   /** Requests a minute per client address before the session check (default 2000; offices share an address). */
   ipRateLimitPerMinute?: number;
+  /** File storage; defaults to S3 (MinIO locally). */
+  store?: ObjectStore;
+  /** Job queue; defaults to pg-boss in Postgres. */
+  queue?: JobQueue;
   /** Refuse to start when the database login can bypass the app role (default: in production). */
   enforceAppRoleLogin?: boolean;
 }
@@ -68,6 +81,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     registerSecurityHeaders(app);
     await app.register(cookie);
     await app.register(formbody);
+    await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 0 } });
+
+    const store = options.store ?? createS3ObjectStore(config);
+    const queue = options.queue ?? (await createPgBossQueue(config.DATABASE_URL));
+    app.addHook("onClose", async () => {
+      await queue.stop();
+    });
 
     if (options.enforceAppRoleLogin ?? config.NODE_ENV === "production") {
       const problems = await appRoleProblems(database.pool);
@@ -104,6 +124,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       users: createUsersService({ db: database.db, config }),
       audit: createAuditService({ db: database.db }),
       auth,
+    });
+
+    const db = database.db;
+    registerCrmRoutes(app, {
+      accounts: createAccountsService({ db, clock }),
+      deals: createDealsService({ db, clock }),
+      tasks: createTasksService({ db, clock }),
+      imports: createImportsService({ db, store, queue }),
+      exports: createExportService({ db }),
     });
 
     await app.ready();

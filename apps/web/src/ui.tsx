@@ -135,3 +135,58 @@ export function Field({ label, children, hint }: { label: string; children: Reac
     </label>
   );
 }
+
+export function Modal(props: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  const { title, onClose, children, wide = false } = props;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 sm:p-8"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`w-full ${wide ? "max-w-3xl" : "max-w-lg"} rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl`}
+      >
+        <header className="flex items-center gap-2 border-b border-zinc-800 px-4 py-3">
+          <h2 className="text-sm font-semibold text-zinc-100">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="ml-auto rounded p-1 text-zinc-400 hover:bg-zinc-800"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+export function Stat({
+  label,
+  value,
+  sub,
+  tone = "text-zinc-100",
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+      <p className="text-xs text-zinc-400">{label}</p>
+      <p className={`mt-1 text-2xl font-semibold ${tone}`}>{value}</p>
+      {sub !== undefined && <p className="mt-1 text-xs text-zinc-500">{sub}</p>}
+    </div>
+  );
+}

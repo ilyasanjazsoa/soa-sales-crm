@@ -71,6 +71,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
+      - run: node scripts/env-init.mjs && pnpm db:migrate && pnpm db:seed
+      - run: docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin cgr.dev/chainguard/minio:latest server /data
+      - run: |
+          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/ready && break; sleep 1; done
+          docker run --rm --network host -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 cgr.dev/chainguard/minio-client:latest mb --ignore-existing local/soa-crm-local
       - run: pnpm e2e
       - uses: actions/upload-artifact@v4
         if: always()

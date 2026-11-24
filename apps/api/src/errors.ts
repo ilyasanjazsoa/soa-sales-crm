@@ -70,6 +70,9 @@ export function registerErrorHandlers(app: FastifyInstance): void {
         .code(429)
         .send({ error: { code: "rate_limited", message: "Too many requests. Try again shortly." } });
     }
+    if (error.statusCode === 413) {
+      return reply.code(413).send({ error: { code: "too_large", message: "The file is larger than 10 MB." } });
+    }
     if (error.statusCode !== undefined && error.statusCode >= 400 && error.statusCode < 500) {
       return reply
         .code(error.statusCode)

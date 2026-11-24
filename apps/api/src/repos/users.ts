@@ -69,6 +69,16 @@ export function usersRepo(db: Executor) {
       return rows.map((row) => ({ ...row.user, ownedAccounts: row.ownedAccounts }));
     },
 
+    /** Active people a manager can assign work to. */
+    async listAssignable(scope: Scope): Promise<{ id: string; name: string; role: Role }[]> {
+      if (scope.kind === "user" && scope.role === "ae") return [];
+      return db
+        .select({ id: users.id, name: users.name, role: users.role })
+        .from(users)
+        .where(eq(users.active, true))
+        .orderBy(asc(users.name));
+    },
+
     async listActive(_scope: SystemScope): Promise<UserRow[]> {
       return db.select().from(users).where(eq(users.active, true)).orderBy(asc(users.name));
     },

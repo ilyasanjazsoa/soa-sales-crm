@@ -62,3 +62,25 @@ describe("seed data", () => {
     }
   });
 });
+
+describe("seed fit scores", () => {
+  it("are computed for every account", async () => {
+    const database = await createTestDatabase("crm_seed_fit");
+    try {
+      await runMigrations(database.url);
+      const handle = createDb(database.url, { max: 1 });
+      await seedDatabase(handle.db, { domain: "soa.example" });
+      await handle.close();
+      const client = new pg.Client({ connectionString: database.url });
+      await client.connect();
+      const { rows } = await client.query<{ missing: string; scored: string }>(
+        "SELECT count(*) FILTER (WHERE fit_score IS NULL) AS missing, count(*) FILTER (WHERE fit_score > 0) AS scored FROM accounts",
+      );
+      await client.end();
+      expect(rows[0]?.missing).toBe("0");
+      expect(Number(rows[0]?.scored)).toBeGreaterThan(20);
+    } finally {
+      await dropTestDatabase(database.name);
+    }
+  });
+});

@@ -137,10 +137,11 @@ const DEAL_VALUES_CENTS = [
   28_080_000, 63_648_000, 19_968_000, 41_184_000, 33_696_000,
 ];
 
-const BASE_TIME = Date.UTC(2026, 0, 5, 15, 0, 0); // Mon 5 Jan 2026, 09:00 Central
 const day = 24 * 60 * 60 * 1000;
 
-export function buildSeed(domain: string) {
+/** Dates are relative to `now` so signals, contract dates and fit scores stay current whenever you seed. */
+export function buildSeed(domain: string, now: Date = new Date()) {
+  const BASE_TIME = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 15, 0, 0);
   const user = (key: string, name: string, role: "ae" | "manager", title: string, phone: string) => {
     const [first, last] = name.toLowerCase().split(" ");
     return {

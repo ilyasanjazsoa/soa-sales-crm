@@ -5,6 +5,8 @@ import pg from "pg";
 import { testDatabaseUrl } from "./db-setup";
 import { buildApp, type BuildAppOptions } from "../src/app";
 import type { Clock } from "../src/clock";
+import { createMemoryQueue } from "../src/jobs/queue";
+import { createMemoryObjectStore } from "../src/providers/storage";
 
 /** A complete, fictional test configuration pointing at the run's throwaway database. */
 export function testEnv(overrides: Record<string, string> = {}): Record<string, string> {
@@ -46,7 +48,13 @@ export function fakeClock(start = new Date("2026-03-02T15:00:00Z")) {
 
 export async function testApp(options: Partial<BuildAppOptions> & { env?: Record<string, string> } = {}) {
   const { env, ...rest } = options;
-  return buildApp({ config: parseEnv(testEnv(env)), logger: false, ...rest });
+  return buildApp({
+    config: parseEnv(testEnv(env)),
+    logger: false,
+    store: createMemoryObjectStore(),
+    queue: createMemoryQueue(),
+    ...rest,
+  });
 }
 
 /** A direct connection as the schema owner, for arranging data and inspecting raw rows. */

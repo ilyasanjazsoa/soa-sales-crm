@@ -29,6 +29,10 @@ export function registerUserRoutes(
     return { user: await users.updateProfile(session.scope, UpdateMeRequest.parse(request.body), request.ip) };
   });
 
+  app.get("/api/users", { config: { access: "manager" } }, async (request) => ({
+    items: await users.assignable(sessionOf(request).scope),
+  }));
+
   app.get("/api/admin/users", { config: { access: "admin" } }, async (request): Promise<AdminUserList> => {
     return { items: await users.list(sessionOf(request).scope) };
   });
