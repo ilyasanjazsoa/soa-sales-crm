@@ -135,7 +135,7 @@ export function renderProposalPdf(data: ProposalPdfData): Promise<Buffer> {
     heading(doc, "Terms summary");
     doc.text(
       safe(
-        `Prices are in US dollars, billed monthly, for a ${String(data.termMonths)}-month term. ${data.validUntil === null ? "" : `This proposal is valid until ${data.validUntil}. `}The full terms are in the service agreement sent for signature.`,
+        `Prices are in US dollars, billed monthly, for a ${String(data.termMonths)}-month term. ${data.validUntil === null ? "This proposal is valid for 30 days from the day it is sent to you. " : `This proposal is valid until ${data.validUntil}. `}The full terms are in the service agreement sent for signature.`,
       ),
     );
 

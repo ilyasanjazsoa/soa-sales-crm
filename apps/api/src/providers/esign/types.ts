@@ -16,6 +16,8 @@ export type ESignEventType = "viewed" | "signed" | "declined" | "voided" | "othe
 export interface ESignEvent {
   /** Unique per event, used to ignore replays. */
   eventId: string;
+  /** When the provider says the event happened. */
+  occurredAt: Date;
   type: ESignEventType;
   envelopeId: string;
 }
@@ -25,6 +27,9 @@ export interface ESignProvider {
   createEnvelope: (request: EnvelopeRequest) => Promise<{ envelopeId: string }>;
   voidEnvelope: (envelopeId: string) => Promise<void>;
   downloadSigned: (envelopeId: string) => Promise<Buffer>;
+  /** The envelope's state at the provider. A callback is only acted on when this agrees with it (the callback's own
+      signature doesn't cover which envelope it is about). */
+  status: (envelopeId: string) => Promise<"complete" | "declined" | "canceled" | "pending" | "unknown">;
   /** The verified event from a webhook's `json` field, or null when the signature doesn't match. */
   verifyWebhook: (json: string) => ESignEvent | null;
 }

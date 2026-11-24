@@ -78,7 +78,7 @@ export function registerProposalRoutes(
     proposals.approveDiscount(sessionOf(request).scope, id(request.params), request.ip),
   );
   app.post("/api/proposals/:id/render", session, async (request, reply) => {
-    await proposals.render(sessionOf(request).scope, id(request.params));
+    await proposals.render(sessionOf(request).scope, id(request.params), request.ip);
     return reply.code(202).send({ status: "queued" });
   });
   app.post("/api/proposals/:id/send", session, async (request) => {
@@ -166,7 +166,8 @@ export function registerPublicProposalRoutes(
 ): void {
   const { proposals } = deps;
   const viewLimiter = new RateLimiter(30, deps.clock); // 30 a minute per address (§10.3)
-  const hookLimiter = new RateLimiter(30, deps.clock);
+  // The provider sends bursts (several events per envelope): a higher per-address limit than the human pages.
+  const hookLimiter = new RateLimiter(120, deps.clock);
   const notFoundPage = (reply: FastifyReply) =>
     page(
       reply,

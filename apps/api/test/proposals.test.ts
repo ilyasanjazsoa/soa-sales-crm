@@ -342,7 +342,7 @@ describe("contracts and the e-signature webhook", () => {
 
   it("stores the signed PDF, wins the deal and creates the hand-off task once; a replay changes nothing", async () => {
     const { contract, envelopeId } = await sendContract();
-    const event = esign.callback("signed", envelopeId, "1772800000");
+    const event = esign.callback("signed", envelopeId);
     const first = await app.inject({ method: "POST", url: "/webhooks/esign", ...multipart(event) });
     expect(first.statusCode, first.body).toBe(200);
     expect(first.body).toBe("Hello API Event Received");
@@ -369,20 +369,21 @@ describe("contracts and the e-signature webhook", () => {
 
   it("counts views and records a decline with a task for the rep", async () => {
     const { envelopeId } = await sendContract();
+    const at = (secondsAgo: number) => String(Math.floor(Date.now() / 1000) - secondsAgo);
     await app.inject({
       method: "POST",
       url: "/webhooks/esign",
-      ...multipart(esign.callback("viewed", envelopeId, "1")),
+      ...multipart(esign.callback("viewed", envelopeId, at(3))),
     });
     await app.inject({
       method: "POST",
       url: "/webhooks/esign",
-      ...multipart(esign.callback("viewed", envelopeId, "2")),
+      ...multipart(esign.callback("viewed", envelopeId, at(2))),
     });
     await app.inject({
       method: "POST",
       url: "/webhooks/esign",
-      ...multipart(esign.callback("declined", envelopeId, "3")),
+      ...multipart(esign.callback("declined", envelopeId, at(1))),
     });
     expect(await ownerQuery("SELECT status, view_count FROM contracts")).toEqual([
       { status: "declined", view_count: 2 },
@@ -401,5 +402,107 @@ describe("contracts and the e-signature webhook", () => {
       payload: { signerContactId: contactId, startDate: "2026-12-01" },
     });
     expect(early.statusCode).toBe(409);
+  });
+});
+
+describe("review fixes", () => {
+  const multipart = (json: string) => {
+    const boundary = "----soaBoundary";
+    return {
+      headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+      payload: `--${boundary}\r\nContent-Disposition: form-data; name="json"\r\n\r\n${json}\r\n--${boundary}--\r\n`,
+    };
+  };
+  const contractFor = async () => {
+    const proposal = await createProposal();
+    await sendProposal(proposal.id);
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/proposals/${proposal.id}/contract`,
+      ...as(),
+      payload: { signerContactId: contactId, startDate: "2026-12-01" },
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    const [row] = await ownerQuery<{ provider_envelope_id: string }>("SELECT provider_envelope_id FROM contracts");
+    return { proposal, envelopeId: row?.provider_envelope_id ?? "" };
+  };
+
+  it("a signed contract wins its own deal, never another open one on the account", async () => {
+    const { envelopeId } = await contractFor();
+    await ownerQuery("UPDATE deals SET status = 'lost', lost_reason = 'Price' WHERE id = $1", [dealId]);
+    const [other] = await ownerQuery<{ id: string }>(
+      "INSERT INTO deals (account_id, owner_user_id, name, stage) VALUES ($1, $2, 'Second try', 'contacted') RETURNING id",
+      [accountId, ae.id],
+    );
+    await app.inject({ method: "POST", url: "/webhooks/esign", ...multipart(esign.callback("signed", envelopeId)) });
+    expect(await ownerQuery("SELECT stage, status FROM deals WHERE id = $1", [other?.id])).toEqual([
+      { stage: "contacted", status: "open" },
+    ]);
+    const [task] = await ownerQuery<{ title: string }>("SELECT title FROM tasks");
+    expect(task?.title).toContain("signed on a closed deal");
+  });
+
+  it("a callback naming an envelope that isn't actually complete changes nothing", async () => {
+    const { envelopeId } = await contractFor();
+    // An authentic body replayed with another envelope id still verifies (the hash doesn't cover the id).
+    const forged = JSON.stringify({
+      ...(JSON.parse(esign.callback("signed", "fake-envelope-other")) as Record<string, unknown>),
+      signature_request: { signature_request_id: envelopeId },
+    });
+    const response = await app.inject({ method: "POST", url: "/webhooks/esign", ...multipart(forged) });
+    expect(response.statusCode).toBe(200);
+    expect(await ownerQuery("SELECT status FROM contracts")).toEqual([{ status: "sent" }]);
+    expect(await ownerQuery("SELECT stage FROM deals")).toEqual([{ stage: "contract_sent" }]);
+  });
+
+  it("rejects an old callback", async () => {
+    const { envelopeId } = await contractFor();
+    const old = esign.callback("signed", envelopeId, String(Math.floor(Date.now() / 1000) - 4 * 86_400));
+    expect((await app.inject({ method: "POST", url: "/webhooks/esign", ...multipart(old) })).statusCode).toBe(401);
+  });
+
+  it("never re-renders a sent proposal's PDF", async () => {
+    const proposal = await createProposal();
+    await sendProposal(proposal.id);
+    const [before] = await ownerQuery<{ pdf_object_key: string }>("SELECT pdf_object_key FROM proposals");
+    const again = await app.inject({ method: "POST", url: `/api/proposals/${proposal.id}/render`, ...as() });
+    expect(again.statusCode).toBe(409);
+    await render(proposal.id); // a stale job does nothing either
+    expect(await ownerQuery("SELECT pdf_object_key FROM proposals")).toEqual([before]);
+  });
+
+  it("an approval doesn't survive a change to the package", async () => {
+    const proposal = await createProposal({ manualDiscount: 0.15 });
+    const manager = await createUser("max@soa.example", "manager");
+    const managerSession = await signIn(app, manager.email);
+    await app.inject({ method: "POST", url: `/api/proposals/${proposal.id}/approve-discount`, ...as(managerSession) });
+    const changed = await app.inject({
+      method: "PATCH",
+      url: `/api/proposals/${proposal.id}`,
+      ...as(),
+      payload: { package: { ...REFERENCE, posts: 10, armed: true } },
+    });
+    expect(Proposal.parse(changed.json()).needsApproval).toBe(true);
+  });
+
+  it("refuses to send a proposal to a contact who can't be emailed, before changing anything", async () => {
+    const proposal = await createProposal();
+    await app.inject({ method: "POST", url: `/api/proposals/${proposal.id}/render`, ...as() });
+    await render(proposal.id);
+    await ownerQuery("INSERT INTO suppressions (email, reason) VALUES ('dana@harbor.example', 'unsubscribe')");
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/proposals/${proposal.id}/send`,
+      ...as(),
+      payload: {},
+    });
+    expect(response.statusCode).toBe(422);
+    expect(await ownerQuery("SELECT status FROM proposals")).toEqual([{ status: "draft" }]);
+  });
+
+  it("marks the proposal accepted when the contract is signed", async () => {
+    const { envelopeId } = await contractFor();
+    await app.inject({ method: "POST", url: "/webhooks/esign", ...multipart(esign.callback("signed", envelopeId)) });
+    expect(await ownerQuery("SELECT status FROM proposals")).toEqual([{ status: "accepted" }]);
   });
 });

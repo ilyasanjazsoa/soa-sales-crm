@@ -6,7 +6,12 @@ import { Package } from "./pricing";
 
 const timestamp = z.iso.datetime({ offset: true });
 const cents = z.number().int().min(0).max(100_000_000);
-const rate = z.number().min(0).max(0.9999);
+/** A rate with at most 4 decimal places (stored as numeric(5,4)), rounded the same everywhere. */
+const rate = z
+  .number()
+  .min(0)
+  .max(0.9999)
+  .transform((value) => Math.round(value * 10_000) / 10_000);
 
 export const PriceBreakdownSchema = z.object({
   pricingConfigId: z.string(),

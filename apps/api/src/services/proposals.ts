@@ -54,6 +54,7 @@ type ProposalConfig = Pick<
   Env,
   | "PUBLIC_URL"
   | "IP_HASH_SALT"
+  | "DEPLOY_ENV"
   | "COMPANY_NAME"
   | "COMPANY_POSTAL_ADDRESS"
   | "COMPANY_SIGNER_NAME"
@@ -72,6 +73,8 @@ export interface ProposalDeps {
 
 const SHARE_DAYS = 30;
 const RENDER_STALE_MS = 10 * 60 * 1000;
+/** Callbacks older than this are refused (Dropbox Sign retries for up to a few days). */
+const WEBHOOK_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 
 /** What a proposal stores: the engine's breakdown plus what is needed to show it later without the live config. */
 const Snapshot = z.object({
@@ -341,14 +344,20 @@ export function createProposalsService(deps: ProposalDeps) {
         const discount = patch.manualDiscount ?? Number(row.proposal.manualDiscount);
         const pricing = await livePricing(tx, scope);
         const breakdown = priceBreakdown(pkg, pricing, discount);
-        const discountChanged = discount !== Number(row.proposal.manualDiscount);
+        const before = Snapshot.parse(row.proposal.pricing);
+        // An approval covers one price: a different package, discount or price needs approving again.
+        const priceChanged =
+          discount !== Number(row.proposal.manualDiscount) ||
+          JSON.stringify(pkg) !== JSON.stringify(row.proposal.package) ||
+          breakdown.annualCents !== before.annualCents ||
+          pricing.maxManualDiscount !== before.maxManualDiscount;
         await proposalsRepo(tx).update(scope, id, {
           package: pkg,
           manualDiscount: discount.toFixed(4),
           pricing: snapshotOf(breakdown, pricing),
           ...(patch.coverNote === undefined ? {} : { coverNote: patch.coverNote }),
-          // A changed discount needs approving again; any change makes the PDF out of date.
-          ...(discountChanged ? { discountApprovedBy: null } : {}),
+          // Any change makes the PDF out of date.
+          ...(priceChanged ? { discountApprovedBy: null } : {}),
           pdfObjectKey: null,
         });
         await auditRepo(tx).write(scope, {
@@ -391,18 +400,23 @@ export function createProposalsService(deps: ProposalDeps) {
       return proposalFor(scope, id);
     },
 
-    async render(scope: UserScope, id: string): Promise<void> {
-      const row = await proposalsRepo(db).lockEditable(scope, id);
-      if (row === undefined) throw notFound();
-      if ((await renderState(scope, row.accountId, id)).rendering) {
-        throw conflict("already_running", "The PDF is already being generated.");
-      }
-      await activitiesRepo(db).insert(scope, {
-        accountId: row.accountId,
-        dealId: row.proposal.dealId,
-        type: "note",
-        subject: `Generating the PDF for proposal v${String(row.proposal.version)}`,
-        meta: { job: JOBS.proposalRender, state: "requested", proposalId: id },
+    /** Only a draft's PDF is (re)generated: a sent proposal's PDF is what the client received and never changes. */
+    async render(scope: UserScope, id: string, ip: string | null): Promise<void> {
+      await db.transaction(async (tx) => {
+        const row = await proposalsRepo(tx).lockEditable(scope, id);
+        if (row === undefined) throw notFound();
+        if (row.proposal.status !== "draft") throw conflict("not_draft", "A sent proposal's PDF can't change.");
+        if ((await renderState(scope, row.accountId, id)).rendering) {
+          throw conflict("already_running", "The PDF is already being generated.");
+        }
+        await activitiesRepo(tx).insert(scope, {
+          accountId: row.accountId,
+          dealId: row.proposal.dealId,
+          type: "note",
+          subject: `Generating the PDF for proposal v${String(row.proposal.version)}`,
+          meta: { job: JOBS.proposalRender, state: "requested", proposalId: id },
+        });
+        await auditRepo(tx).write(scope, { action: "proposal.render", entityType: "proposal", entityId: id, ip });
       });
       await queue.send(JOBS.proposalRender, { proposalId: id });
     },
@@ -415,6 +429,7 @@ export function createProposalsService(deps: ProposalDeps) {
         if (row === undefined) throw notFound();
         const { proposal } = row;
         if (proposal.status !== "draft") throw conflict("already_sent", "This proposal was already sent.");
+        if (row.dealStatus !== "open") throw conflict("deal_closed", "This deal is closed.");
         const snapshot = Snapshot.parse(proposal.pricing);
         if (needsApproval(proposal, snapshot)) {
           throw conflict("needs_approval", "The discount is above the limit. A manager must approve it first.");
@@ -427,6 +442,10 @@ export function createProposalsService(deps: ProposalDeps) {
               contacts.find((entry) => entry.email !== null))
             : contacts.find((entry) => entry.id === contactId);
         if (contact?.email == null) throw unprocessable("no_contact", "Add a contact with an email address first.");
+        // Checked before anything changes: the link only exists in the email draft.
+        if (contact.emailStatus !== "ok" || (await suppressionListRepo(tx).reason(scope, contact.email)) !== null) {
+          throw unprocessable("suppressed", "This contact can't be emailed. Choose another contact.");
+        }
 
         const token = randomBytes(32).toString("base64url");
         const expiresAt = new Date(now.getTime() + SHARE_DAYS * 86_400_000);
@@ -462,7 +481,7 @@ export function createProposalsService(deps: ProposalDeps) {
           .update(tables.deals)
           .set({ annualValueCents: snapshot.annualCents, updatedAt: sql`now()` })
           .where(eq(tables.deals.id, proposal.dealId));
-        await advanceDeal(tx, scope, row.accountId, "proposal", "proposal_sent", now);
+        await advanceDeal(tx, scope, row.accountId, "proposal", "proposal_sent", now, proposal.dealId);
         return { draftId, expiresAt: expiresAt.toISOString() };
       });
     },
@@ -485,24 +504,44 @@ export function createProposalsService(deps: ProposalDeps) {
       return toContract(row.contract);
     },
 
+    /** The signed copy. If the provider wasn't ready when the callback came, it is fetched and stored now. */
     async signedPdf(scope: UserScope, id: string): Promise<Buffer> {
       const row = await contractsRepo(db).get(scope, id);
-      if (row?.contract.signedPdfObjectKey == null) throw notFound();
-      return store.get(row.contract.signedPdfObjectKey);
+      if (row?.contract.status !== "signed") throw notFound();
+      if (row.contract.signedPdfObjectKey !== null) return store.get(row.contract.signedPdfObjectKey);
+      if (row.contract.providerEnvelopeId === null) throw notFound();
+      const pdf = await esign.downloadSigned(row.contract.providerEnvelopeId);
+      const key = `contracts/${row.contract.dealId}/${row.contract.id}-signed.pdf`;
+      await store.put(key, pdf, "application/pdf");
+      await contractsRepo(db).update(systemScope("signed copy"), row.contract.id, { signedPdfObjectKey: key });
+      return pdf;
     },
 
-    /** §10.2: fill the agreement and send the envelope (the client signs first, the company second). */
+    /** §10.2: fill the agreement and send the envelope (the client signs first, the company second). The contract
+        row is committed as a draft first (holding the deal's "one open contract" slot), then the envelope is sent,
+        then the row is marked sent; a failure at either step voids what was made. */
     async createContract(scope: UserScope, proposalId: string, request: CreateContractRequest, ip: string | null) {
       const now = clock();
-      const id = await db.transaction(async (tx) => {
+      const prepared = await db.transaction(async (tx) => {
         const row = await proposalsRepo(tx).lockEditable(scope, proposalId);
         if (row === undefined) throw notFound();
+        // One open contract per deal, decided under the deal's row lock.
+        const deal = await lockEditableDeal(tx, scope, row.proposal.dealId);
+        if (deal === undefined) throw notFound();
+        if (deal.deal.status !== "open") throw conflict("deal_closed", "This deal is closed.");
         const signerName = config.COMPANY_SIGNER_NAME;
         const signerEmail = config.COMPANY_SIGNER_EMAIL;
         if (signerName === undefined || signerEmail === undefined) {
           throw unprocessable(
             "no_company_signer",
             "The company counter-signer isn't set (COMPANY_SIGNER_NAME and COMPANY_SIGNER_EMAIL).",
+          );
+        }
+        if (config.DEPLOY_ENV === "production") {
+          // The agreement is a placeholder marked DRAFT until the company supplies its own (DECISIONS.md item C).
+          throw unprocessable(
+            "no_agreement",
+            "The service agreement isn't set up yet. Contracts can't be sent in production.",
           );
         }
         const { proposal } = row;
@@ -521,7 +560,6 @@ export function createProposalsService(deps: ProposalDeps) {
         if (contact.emailStatus !== "ok" || (await suppressionListRepo(tx).reason(scope, contact.email)) !== null) {
           throw unprocessable("suppressed", "This contact can't be emailed (suppressed, bounced or unsubscribed).");
         }
-        const account = await tx.select().from(tables.accounts).where(eq(tables.accounts.id, row.accountId));
         const snapshot = Snapshot.parse(proposal.pricing);
         const pkg = Package.parse(proposal.package);
         const document = await renderAgreementPdf({
@@ -529,7 +567,7 @@ export function createProposalsService(deps: ProposalDeps) {
           companyAddress: config.COMPANY_POSTAL_ADDRESS ?? null,
           companySigner: signerName,
           accountName: row.accountName,
-          accountAddress: account[0] === undefined ? null : fullAddress(account[0]),
+          accountAddress: fullAddress(deal.account),
           signerName: `${contact.firstName} ${contact.lastName}`.trim(),
           signerEmail: contact.email,
           lines: packageLines(pkg, snapshot.addonLabels),
@@ -545,46 +583,65 @@ export function createProposalsService(deps: ProposalDeps) {
           signerContactId: contact.id,
           createdBy: scope.userId,
         });
-        const envelope = await esign.createEnvelope({
-          title: `Security Services Agreement: ${row.accountName}`,
-          subject: `Agreement for ${row.accountName}`,
-          message: `Please review and sign the security services agreement for ${row.accountName}.`,
-          document,
-          signers: [
-            { name: `${contact.firstName} ${contact.lastName}`.trim(), email: contact.email },
-            { name: signerName, email: signerEmail },
-          ],
+        return {
           contractId: contract.id,
+          dealId: proposal.dealId,
+          accountId: row.accountId,
+          accountName: row.accountName,
+          document,
+          contact: { id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim(), email: contact.email },
+          signer: { name: signerName, email: signerEmail },
+        };
+      });
+
+      const giveUp = () =>
+        contractsRepo(db)
+          .update(scope, prepared.contractId, { status: "voided" })
+          .catch(() => undefined);
+      let envelope: { envelopeId: string };
+      try {
+        envelope = await esign.createEnvelope({
+          title: `Security Services Agreement: ${prepared.accountName}`,
+          subject: `Agreement for ${prepared.accountName}`,
+          message: `Please review and sign the security services agreement for ${prepared.accountName}.`,
+          document: prepared.document,
+          signers: [{ name: prepared.contact.name, email: prepared.contact.email }, prepared.signer],
+          contractId: prepared.contractId,
         });
-        try {
-          await contractsRepo(tx).update(scope, contract.id, {
+      } catch (error) {
+        await giveUp();
+        throw error;
+      }
+      try {
+        await db.transaction(async (tx) => {
+          await contractsRepo(tx).update(scope, prepared.contractId, {
             status: "sent",
             sentAt: now,
             providerEnvelopeId: envelope.envelopeId,
           });
           await activitiesRepo(tx).insert(scope, {
-            accountId: row.accountId,
-            dealId: proposal.dealId,
-            contactId: contact.id,
+            accountId: prepared.accountId,
+            dealId: prepared.dealId,
+            contactId: prepared.contact.id,
             type: "contract_sent",
-            subject: `Contract sent to ${`${contact.firstName} ${contact.lastName}`.trim()} for signature`,
-            meta: { contractId: contract.id },
+            subject: `Contract sent to ${prepared.contact.name} for signature`,
+            meta: { contractId: prepared.contractId },
           });
           await auditRepo(tx).write(scope, {
             action: "contract.send",
             entityType: "contract",
-            entityId: contract.id,
+            entityId: prepared.contractId,
             meta: { proposalId, startDate: request.startDate },
             ip,
           });
-          await advanceDeal(tx, scope, row.accountId, "contract_sent", "contract_sent", now);
-        } catch (error) {
-          await esign.voidEnvelope(envelope.envelopeId).catch(() => undefined);
-          throw error;
-        }
-        return contract.id;
-      });
-      return this.contract(scope, id);
+          await advanceDeal(tx, scope, prepared.accountId, "contract_sent", "contract_sent", now, prepared.dealId);
+        });
+      } catch (error) {
+        await esign.voidEnvelope(envelope.envelopeId).catch(() => undefined);
+        await giveUp();
+        throw error;
+      }
+      return this.contract(scope, prepared.contractId);
     },
 
     async voidContract(scope: UserScope, id: string, ip: string | null): Promise<Contract> {
@@ -614,6 +671,31 @@ export function createProposalsService(deps: ProposalDeps) {
       if (event === null) return "rejected";
       const scope = systemScope("esign webhook");
       const now = clock();
+      // Old events are not trusted (a captured callback replayed much later).
+      if (now.getTime() - event.occurredAt.getTime() > WEBHOOK_MAX_AGE_MS) return "rejected";
+
+      // The callback's signature doesn't cover which envelope it names, so the provider's own record decides.
+      let state: Awaited<ReturnType<ESignProvider["status"]>> = "unknown";
+      if (event.type !== "viewed" && event.type !== "other") state = await esign.status(event.envelopeId);
+      const confirmed =
+        event.type === "viewed" ||
+        (event.type === "signed" && state === "complete") ||
+        (event.type === "declined" && state === "declined") ||
+        (event.type === "voided" && state === "canceled");
+      if (!confirmed) return "ok"; // acknowledged, nothing changed
+
+      // The signed copy, fetched before the transaction (the provider may still be preparing it: then later).
+      let signedKey: string | null = null;
+      if (event.type === "signed") {
+        try {
+          const pdf = await esign.downloadSigned(event.envelopeId);
+          signedKey = `contracts/envelopes/${event.envelopeId}-signed.pdf`;
+          await store.put(signedKey, pdf, "application/pdf");
+        } catch {
+          signedKey = null; // GET /contracts/:id/signed.pdf fetches it on first use
+        }
+      }
+
       await db.transaction(async (tx) => {
         // Replays change nothing: each processed event is recorded in the (append-only) audit log.
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`esign:${event.envelopeId}`}))`);
@@ -633,31 +715,35 @@ export function createProposalsService(deps: ProposalDeps) {
         const { contract } = row;
         const deal = await tx.select().from(tables.deals).where(eq(tables.deals.id, contract.dealId));
         const owner = deal[0]?.ownerUserId ?? contract.createdBy;
+        const dealOpen = deal[0]?.status === "open";
 
         if (event.type === "viewed" && ["sent", "viewed"].includes(contract.status)) {
           await contractsRepo(tx).update(scope, contract.id, { viewCount: contract.viewCount + 1, status: "viewed" });
         } else if (event.type === "signed" && contract.status !== "signed") {
-          const pdf = await esign.downloadSigned(event.envelopeId);
-          const key = `contracts/${contract.dealId}/${contract.id}-signed.pdf`;
-          await store.put(key, pdf, "application/pdf");
           await contractsRepo(tx).update(scope, contract.id, {
             status: "signed",
             signedAt: now,
-            signedPdfObjectKey: key,
+            signedPdfObjectKey: signedKey,
           });
+          await proposalsRepo(tx).update(scope, contract.proposalId, { status: "accepted" });
           await activitiesRepo(tx).insert(scope, {
             accountId: row.accountId,
             dealId: contract.dealId,
             type: "contract_signed",
-            subject: "Contract signed. Signed copy stored.",
+            subject: signedKey === null ? "Contract signed." : "Contract signed. Signed copy stored.",
             meta: { contractId: contract.id },
           });
-          await advanceDeal(tx, scope, row.accountId, "won", "contract_signed", now);
+          if (dealOpen) {
+            // This contract's own deal, never "the account's current deal".
+            await advanceDeal(tx, scope, row.accountId, "won", "contract_signed", now, contract.dealId);
+          }
           await tasksRepo(tx).insert(scope, {
             ownerUserId: owner,
             accountId: row.accountId,
             dealId: contract.dealId,
-            title: `Hand off ${row.accountName} to operations`,
+            title: dealOpen
+              ? `Hand off ${row.accountName} to operations`
+              : `A contract for ${row.accountName} was signed on a closed deal: check with your manager`,
             dueAt: now,
           });
         } else if ((event.type === "declined" || event.type === "voided") && contract.status !== "signed") {
@@ -753,6 +839,7 @@ export async function runProposalRender(
   const row = await proposalsRepo(db).get(system, job.proposalId);
   if (row === undefined) return;
   const { proposal } = row;
+  if (proposal.status !== "draft") return; // a sent proposal's PDF never changes
   const record = (scope: Scope, state: "done" | "failed", message: string) =>
     activitiesRepo(db).insert(scope, {
       accountId: row.accountId,
@@ -785,20 +872,25 @@ export async function runProposalRender(
       termMonths: pkg.termMonths,
       termDiscount: snapshot.termDiscount,
       manualDiscount: snapshot.manualDiscount,
-      validUntil: proposal.expiresAt === null ? null : isoDay(proposal.expiresAt),
+      validUntil: null, // the link's 30 days start when it is sent; the PDF says so
       rep: { name: rep.name, title: rep.title, email: rep.email, phone: rep.phone },
     });
-    const key = `proposals/${proposal.dealId}/${proposal.id}-v${String(proposal.version)}.pdf`;
+    // A new object per render, so a late job can never overwrite the PDF a proposal already points to.
+    const key = `proposals/${proposal.dealId}/${proposal.id}-v${String(proposal.version)}-${randomBytes(8).toString("hex")}.pdf`;
     await deps.store.put(key, pdf, "application/pdf");
     // Only if it is still the same draft text (an edit while rendering makes this PDF stale).
+    // Only if it is still the same draft: same package, discount, price snapshot and cover note as rendered.
     await db
       .update(tables.proposals)
       .set({ pdfObjectKey: key })
       .where(
         and(
           eq(tables.proposals.id, proposal.id),
+          eq(tables.proposals.status, "draft"),
           sql`${tables.proposals.package} = ${JSON.stringify(proposal.package)}::jsonb`,
+          sql`${tables.proposals.pricing} = ${JSON.stringify(proposal.pricing)}::jsonb`,
           sql`${tables.proposals.manualDiscount} = ${proposal.manualDiscount}`,
+          sql`${tables.proposals.coverNote} IS NOT DISTINCT FROM ${proposal.coverNote}`,
         ),
       );
     await record(scope, "done", `PDF ready for proposal v${String(proposal.version)}`);
