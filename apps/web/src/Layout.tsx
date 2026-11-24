@@ -14,6 +14,7 @@ import {
 import { z } from "zod";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router";
 import { api } from "./api";
+import { AskPalette } from "./pages/Ask";
 import { ME_KEY, useMe } from "./session";
 import { Btn, ErrorState, Loading } from "./ui";
 
@@ -100,6 +101,7 @@ export function Layout() {
           ))}
         </nav>
       </header>
+      <AskPalette />
       {me.data.mail.needsReconnect && (
         <div role="alert" className="border-b border-amber-900 bg-amber-950/40 px-4 py-2 text-sm text-amber-200">
           Your mailbox connection needs to be renewed.{" "}

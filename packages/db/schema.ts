@@ -536,6 +536,7 @@ export const emailMessages = pgTable(
     }).onDelete("set null"),
     unique("email_messages_provider_provider_message_id_key").on(t.provider, t.providerMessageId),
     index("email_messages_thread_idx").on(t.provider, t.providerThreadId),
+    index("email_messages_account_idx").on(t.accountId, t.direction),
     index("email_messages_user_sent_idx").on(t.userId, t.sentAt).where(raw("direction = 'out'")),
   ],
 );

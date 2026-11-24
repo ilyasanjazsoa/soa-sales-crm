@@ -463,6 +463,15 @@ const ROUTES: Record<string, RouteCase> = {
     path: (ctx) => `/api/meetings/${ctx.ae1MeetingId}/prep`,
     asOtherAe: expectNotFound,
   },
+  // ───────── today and ask ─────────
+  "GET /api/today": { access: "session", path: () => "/api/today", asOtherAe: expectNothingOf },
+  "POST /api/ask": {
+    access: "session",
+    path: () => "/api/ask",
+    body: () => ({ question: `How is ${AE1_ACCOUNT_NAME} doing?` }),
+    asOtherAe: expectNothingOf,
+  },
+
   // ───────── pricing, proposals, contracts ─────────
   "POST /api/pricing/quote": {
     access: "session",
