@@ -81,7 +81,11 @@ export function createDropboxSignProvider(options: {
         form.append(`signers[${String(index)}][email_address]`, signer.email);
         form.append(`signers[${String(index)}][order]`, String(index));
       });
-      form.append("files[0]", new Blob([new Uint8Array(request.document)], { type: "application/pdf" }), "agreement.pdf");
+      form.append(
+        "files[0]",
+        new Blob([new Uint8Array(request.document)], { type: "application/pdf" }),
+        "agreement.pdf",
+      );
       const body = z
         .object({ signature_request: z.object({ signature_request_id: z.string() }) })
         .parse(await (await call("/signature_request/send", { method: "POST", body: form })).json());

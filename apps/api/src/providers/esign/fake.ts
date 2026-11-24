@@ -11,7 +11,11 @@ export function createFakeESignProvider(options: { webhookKey: string }) {
     name: "fake",
     createEnvelope(request) {
       const envelopeId = `fake-envelope-${randomUUID()}`;
-      envelopes.set(envelopeId, { document: request.document, voided: false, signers: request.signers.map((s) => s.email) });
+      envelopes.set(envelopeId, {
+        document: request.document,
+        voided: false,
+        signers: request.signers.map((s) => s.email),
+      });
       return Promise.resolve({ envelopeId });
     },
     voidEnvelope(envelopeId) {

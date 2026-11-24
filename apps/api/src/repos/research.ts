@@ -107,8 +107,13 @@ export function researchRepo(db: Executor) {
     },
 
     /** The latest research job event on an account (requested, failed), from the timeline. */
-    /** The latest timeline event of a job on the account; `meetingId` narrows it to one meeting's job. */
-    async lastJobEvent(scope: Scope, accountId: string, job: string, meetingId?: string) {
+    /** The latest timeline event of a job on the account; `match` narrows it to one meeting's or proposal's job. */
+    async lastJobEvent(
+      scope: Scope,
+      accountId: string,
+      job: string,
+      match: { meetingId?: string; proposalId?: string } = {},
+    ) {
       const [row] = await db
         .select({ occurredAt: activities.occurredAt, meta: activities.meta })
         .from(activities)
@@ -118,7 +123,8 @@ export function researchRepo(db: Executor) {
             eq(activities.accountId, accountId),
             accountVisible(scope),
             sql`${activities.meta}->>'job' = ${job}`,
-            meetingId === undefined ? undefined : sql`${activities.meta}->>'meetingId' = ${meetingId}`,
+            match.meetingId === undefined ? undefined : sql`${activities.meta}->>'meetingId' = ${match.meetingId}`,
+            match.proposalId === undefined ? undefined : sql`${activities.meta}->>'proposalId' = ${match.proposalId}`,
           ),
         )
         .orderBy(desc(activities.occurredAt))

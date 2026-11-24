@@ -572,7 +572,7 @@ const PREP_STALE_MS = 10 * 60 * 1000;
 
 /** The latest prep job outcome for this meeting, from its timeline events (as research jobs do). */
 async function prepJobState(db: Executor, scope: Scope, accountId: string, meetingId: string, now: Date) {
-  const event = await researchRepo(db).lastJobEvent(scope, accountId, JOBS.prepGenerate, meetingId);
+  const event = await researchRepo(db).lastJobEvent(scope, accountId, JOBS.prepGenerate, { meetingId });
   if (event === undefined) return { pending: false, lastError: null };
   if (event.meta.state === "requested") {
     return now.getTime() - event.occurredAt.getTime() < PREP_STALE_MS

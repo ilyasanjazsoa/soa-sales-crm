@@ -41,16 +41,28 @@ export interface AgreementPdfData {
 }
 
 /** pdfkit's standard fonts use WinAnsi: replace anything outside it so the text stays readable and extractable. */
+const ALLOWED_EXTRA = new Set([0x2013, 0x2014, 0x2022]); // en dash, em dash, bullet
 const safe = (text: string) =>
-  text
-    .replace(/[‘’]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/…/g, "...")
-    .replace(/[^\x09\x0a\x0d\x20-\x7e\xa0-\xff–—•]/g, "?");
+  Array.from(
+    text
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201c\u201d]/g, '"')
+      .replace(/\u2026/g, "..."),
+    (char) => {
+      const code = char.codePointAt(0) ?? 0;
+      const ok =
+        code === 9 || code === 10 || code === 13 || (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff);
+      return ok || ALLOWED_EXTRA.has(code) ? char : "?";
+    },
+  ).join("");
 
 function render(build: (doc: PDFKit.PDFDocument) => void, title: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "LETTER", margin: 56, info: { Title: safe(title), Producer: "SOA Sales CRM" } });
+    const doc = new PDFDocument({
+      size: "LETTER",
+      margin: 56,
+      info: { Title: safe(title), Producer: "SOA Sales CRM" },
+    });
     const chunks: Buffer[] = [];
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
     doc.on("end", () => {
@@ -70,11 +82,19 @@ const heading = (doc: PDFKit.PDFDocument, text: string) => {
 export function renderProposalPdf(data: ProposalPdfData): Promise<Buffer> {
   return render((doc) => {
     doc.font("Helvetica-Bold").fontSize(20).fillColor("#065f46").text(safe(data.companyName));
-    doc.font("Helvetica").fontSize(10).fillColor("#555555").text(safe(data.companyAddress ?? ""));
+    doc
+      .font("Helvetica")
+      .fontSize(10)
+      .fillColor("#555555")
+      .text(safe(data.companyAddress ?? ""));
     doc.moveDown(1.5).font("Helvetica-Bold").fontSize(16).fillColor("#111111");
     doc.text(safe(`Security services proposal for ${data.accountName}`));
     doc.font("Helvetica").fontSize(10).fillColor("#555555");
-    doc.text(safe(`Version ${String(data.version)} - ${data.date}${data.accountAddress === null ? "" : ` - ${data.accountAddress}`}`));
+    doc.text(
+      safe(
+        `Version ${String(data.version)} - ${data.date}${data.accountAddress === null ? "" : ` - ${data.accountAddress}`}`,
+      ),
+    );
     if (data.contactName !== null) doc.text(safe(`Prepared for ${data.contactName}`));
 
     heading(doc, "Cover note");
@@ -98,7 +118,8 @@ export function renderProposalPdf(data: ProposalPdfData): Promise<Buffer> {
     row("Annual price", formatMoney(data.annualCents), true);
     row("Term", `${String(data.termMonths)} months`);
     if (data.termDiscount > 0) row("Term discount included", `${String(Math.round(data.termDiscount * 1000) / 10)}%`);
-    if (data.manualDiscount > 0) row("Additional discount included", `${String(Math.round(data.manualDiscount * 1000) / 10)}%`);
+    if (data.manualDiscount > 0)
+      row("Additional discount included", `${String(Math.round(data.manualDiscount * 1000) / 10)}%`);
     doc.font("Helvetica").moveDown(0.5);
     doc.x = 56;
 
@@ -128,11 +149,19 @@ export function renderProposalPdf(data: ProposalPdfData): Promise<Buffer> {
 
 export function renderAgreementPdf(data: AgreementPdfData): Promise<Buffer> {
   return render((doc) => {
-    doc.font("Helvetica-Bold").fontSize(12).fillColor("#b91c1c").text("DRAFT - placeholder agreement. Replace with the company's service agreement before use.");
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(12)
+      .fillColor("#b91c1c")
+      .text("DRAFT - placeholder agreement. Replace with the company's service agreement before use.");
     doc.moveDown(1).font("Helvetica-Bold").fontSize(18).fillColor("#111111").text("Security Services Agreement");
     doc.font("Helvetica").fontSize(10.5).fillColor("#222222").moveDown(0.5);
-    doc.text(safe(`Between ${data.companyName}${data.companyAddress === null ? "" : `, ${data.companyAddress}`} ("Provider")`));
-    doc.text(safe(`and ${data.accountName}${data.accountAddress === null ? "" : `, ${data.accountAddress}`} ("Client").`));
+    doc.text(
+      safe(`Between ${data.companyName}${data.companyAddress === null ? "" : `, ${data.companyAddress}`} ("Provider")`),
+    );
+    doc.text(
+      safe(`and ${data.accountName}${data.accountAddress === null ? "" : `, ${data.accountAddress}`} ("Client").`),
+    );
     heading(doc, "Services");
     for (const line of data.lines) doc.text(safe(`•  ${line}`), { indent: 8 });
     heading(doc, "Price and term");

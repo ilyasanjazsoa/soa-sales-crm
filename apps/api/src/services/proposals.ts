@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { tables, type Database, type Executor } from "@soa/db";
 import {
   Package,
@@ -94,7 +94,11 @@ const snapshotOf = (breakdown: PriceBreakdown, config: PricingConfig): Snapshot 
   maxManualDiscount: config.maxManualDiscount,
 });
 
-const toVersion = (row: PricingConfigRow, createdBy: string | null, liveId: string | undefined): PricingConfigVersion => {
+const toVersion = (
+  row: PricingConfigRow,
+  createdBy: string | null,
+  liveId: string | undefined,
+): PricingConfigVersion => {
   const config = pricingConfigFromRow(row);
   return {
     id: row.id,
@@ -103,7 +107,11 @@ const toVersion = (row: PricingConfigRow, createdBy: string | null, liveId: stri
     coverageHoursPerWeek: config.coverageHoursPerWeek,
     supervisorMultiplier: config.supervisorMultiplier,
     addons: config.addons,
-    termDiscounts: { "12": config.termDiscounts["12"] ?? 0, "24": config.termDiscounts["24"] ?? 0, "36": config.termDiscounts["36"] ?? 0 },
+    termDiscounts: {
+      "12": config.termDiscounts["12"] ?? 0,
+      "24": config.termDiscounts["24"] ?? 0,
+      "36": config.termDiscounts["36"] ?? 0,
+    },
     maxManualDiscount: config.maxManualDiscount,
     createdAt: row.createdAt.toISOString(),
     createdBy,
@@ -111,8 +119,15 @@ const toVersion = (row: PricingConfigRow, createdBy: string | null, liveId: stri
   };
 };
 
-const fullAddress = (account: { addressLine: string | null; city: string | null; state: string | null; postalCode: string | null }) =>
-  [account.addressLine, account.city, account.state, account.postalCode].filter((part) => part !== null && part !== "").join(", ") || null;
+const fullAddress = (account: {
+  addressLine: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+}) =>
+  [account.addressLine, account.city, account.state, account.postalCode]
+    .filter((part) => part !== null && part !== "")
+    .join(", ") || null;
 
 export const hashToken = (token: string) => sha256Hex(token);
 
@@ -121,7 +136,8 @@ export function createProposalsService(deps: ProposalDeps) {
 
   const livePricing = async (tx: Executor, scope: Scope) => {
     const row = await pricingConfigsRepo(tx).live(scope, isoDay(clock()));
-    if (row === undefined) throw conflict("no_pricing", "Pricing isn't set up yet. A manager adds it under Admin → Pricing.");
+    if (row === undefined)
+      throw conflict("no_pricing", "Pricing isn't set up yet. A manager adds it under Admin → Pricing.");
     return pricingConfigFromRow(row);
   };
 
@@ -129,14 +145,15 @@ export function createProposalsService(deps: ProposalDeps) {
     Number(row.manualDiscount) > snapshot.maxManualDiscount && row.discountApprovedBy === null;
 
   const renderState = async (scope: Scope, accountId: string, proposalId: string) => {
-    const event = await researchRepo(db).lastJobEvent(scope, accountId, JOBS.proposalRender, undefined, proposalId);
+    const event = await researchRepo(db).lastJobEvent(scope, accountId, JOBS.proposalRender, { proposalId });
     if (event === undefined) return { rendering: false, renderError: null };
     if (event.meta.state === "requested") {
       return clock().getTime() - event.occurredAt.getTime() < RENDER_STALE_MS
         ? { rendering: true, renderError: null }
         : { rendering: false, renderError: "The PDF took too long. Generate it again." };
     }
-    if (event.meta.state === "failed") return { rendering: false, renderError: "The PDF couldn't be generated. Try again." };
+    if (event.meta.state === "failed")
+      return { rendering: false, renderError: "The PDF couldn't be generated. Try again." };
     return { rendering: false, renderError: null };
   };
 
@@ -189,7 +206,7 @@ export function createProposalsService(deps: ProposalDeps) {
     return toProposal(scope, row, views.get(id));
   };
 
-  const toContract = async (scope: Scope, row: ContractRow): Promise<Contract> => {
+  const toContract = async (row: ContractRow): Promise<Contract> => {
     const signer =
       row.signerContactId === null
         ? undefined
@@ -208,7 +225,6 @@ export function createProposalsService(deps: ProposalDeps) {
       signedAt: row.signedAt?.toISOString() ?? null,
       signedPdfUrl: row.signedPdfObjectKey === null ? null : `/api/contracts/${row.id}/signed.pdf`,
     };
-    void scope;
   };
 
   return {
@@ -230,7 +246,11 @@ export function createProposalsService(deps: ProposalDeps) {
     },
 
     /** A new version (managers). It applies from its date; proposals already made keep their numbers. */
-    async createPricingConfig(scope: UserScope, input: PricingConfigInput, ip: string | null): Promise<PricingConfigVersion> {
+    async createPricingConfig(
+      scope: UserScope,
+      input: PricingConfigInput,
+      ip: string | null,
+    ): Promise<PricingConfigVersion> {
       if (input.effectiveFrom < isoDay(clock())) {
         throw unprocessable("past_date", "A new version can start today or later, not in the past.");
       }
@@ -270,7 +290,12 @@ export function createProposalsService(deps: ProposalDeps) {
 
     get: proposalFor,
 
-    async create(scope: UserScope, dealId: string, request: CreateProposalRequest, ip: string | null): Promise<Proposal> {
+    async create(
+      scope: UserScope,
+      dealId: string,
+      request: CreateProposalRequest,
+      ip: string | null,
+    ): Promise<Proposal> {
       const id = await db.transaction(async (tx) => {
         const deal = await lockEditableDeal(tx, scope, dealId);
         if (deal === undefined) throw notFound();
@@ -310,7 +335,8 @@ export function createProposalsService(deps: ProposalDeps) {
       await db.transaction(async (tx) => {
         const row = await proposalsRepo(tx).lockEditable(scope, id);
         if (row === undefined) throw notFound();
-        if (row.proposal.status !== "draft") throw conflict("not_draft", "A sent proposal can't change. Make a new version.");
+        if (row.proposal.status !== "draft")
+          throw conflict("not_draft", "A sent proposal can't change. Make a new version.");
         const pkg = patch.package ?? Package.parse(row.proposal.package);
         const discount = patch.manualDiscount ?? Number(row.proposal.manualDiscount);
         const pricing = await livePricing(tx, scope);
@@ -397,7 +423,8 @@ export function createProposalsService(deps: ProposalDeps) {
         const contacts = await contactsRepo(tx).listForAccount(scope, row.accountId);
         const contact =
           contactId === undefined
-            ? (contacts.find((entry) => entry.isPrimary && entry.email !== null) ?? contacts.find((entry) => entry.email !== null))
+            ? (contacts.find((entry) => entry.isPrimary && entry.email !== null) ??
+              contacts.find((entry) => entry.email !== null))
             : contacts.find((entry) => entry.id === contactId);
         if (contact?.email == null) throw unprocessable("no_contact", "Add a contact with an email address first.");
 
@@ -449,13 +476,13 @@ export function createProposalsService(deps: ProposalDeps) {
     // ───────── contracts ─────────
     async contracts(scope: UserScope, dealId: string): Promise<Contract[]> {
       const rows = await contractsRepo(db).listForDeal(scope, dealId);
-      return Promise.all(rows.map((row) => toContract(scope, row.contract)));
+      return Promise.all(rows.map((row) => toContract(row.contract)));
     },
 
     async contract(scope: UserScope, id: string): Promise<Contract> {
       const row = await contractsRepo(db).get(scope, id);
       if (row === undefined) throw notFound();
-      return toContract(scope, row.contract);
+      return toContract(row.contract);
     },
 
     async signedPdf(scope: UserScope, id: string): Promise<Buffer> {
@@ -470,7 +497,10 @@ export function createProposalsService(deps: ProposalDeps) {
       const signerName = config.COMPANY_SIGNER_NAME;
       const signerEmail = config.COMPANY_SIGNER_EMAIL;
       if (signerName === undefined || signerEmail === undefined) {
-        throw unprocessable("no_company_signer", "The company counter-signer isn't set (COMPANY_SIGNER_NAME and COMPANY_SIGNER_EMAIL).");
+        throw unprocessable(
+          "no_company_signer",
+          "The company counter-signer isn't set (COMPANY_SIGNER_NAME and COMPANY_SIGNER_EMAIL).",
+        );
       }
       const id = await db.transaction(async (tx) => {
         const row = await proposalsRepo(tx).lockEditable(scope, proposalId);
@@ -590,7 +620,12 @@ export function createProposalsService(deps: ProposalDeps) {
         const [seen] = await tx
           .select({ id: tables.auditLog.id })
           .from(tables.auditLog)
-          .where(and(eq(tables.auditLog.action, "contract.webhook"), sql`${tables.auditLog.meta}->>'eventId' = ${event.eventId}`))
+          .where(
+            and(
+              eq(tables.auditLog.action, "contract.webhook"),
+              sql`${tables.auditLog.meta}->>'eventId' = ${event.eventId}`,
+            ),
+          )
           .limit(1);
         if (seen !== undefined) return;
         const row = await contractsRepo(tx).lockByEnvelope(scope, event.envelopeId);
@@ -605,7 +640,11 @@ export function createProposalsService(deps: ProposalDeps) {
           const pdf = await esign.downloadSigned(event.envelopeId);
           const key = `contracts/${contract.dealId}/${contract.id}-signed.pdf`;
           await store.put(key, pdf, "application/pdf");
-          await contractsRepo(tx).update(scope, contract.id, { status: "signed", signedAt: now, signedPdfObjectKey: key });
+          await contractsRepo(tx).update(scope, contract.id, {
+            status: "signed",
+            signedAt: now,
+            signedPdfObjectKey: key,
+          });
           await activitiesRepo(tx).insert(scope, {
             accountId: row.accountId,
             dealId: contract.dealId,
@@ -694,7 +733,12 @@ export type ProposalsService = ReturnType<typeof createProposalsService>;
 
 /** proposal.render: the PDF from the proposal's own snapshot, stored in S3. Always records an outcome. */
 export async function runProposalRender(
-  deps: { db: Database; store: ObjectStore; config: Pick<Env, "COMPANY_NAME" | "COMPANY_POSTAL_ADDRESS">; clock: Clock },
+  deps: {
+    db: Database;
+    store: ObjectStore;
+    config: Pick<Env, "COMPANY_NAME" | "COMPANY_POSTAL_ADDRESS">;
+    clock: Clock;
+  },
   job: { proposalId: string },
 ): Promise<void> {
   const { db } = deps;
@@ -743,7 +787,13 @@ export async function runProposalRender(
     await db
       .update(tables.proposals)
       .set({ pdfObjectKey: key })
-      .where(and(eq(tables.proposals.id, proposal.id), sql`${tables.proposals.package} = ${JSON.stringify(proposal.package)}::jsonb`, sql`${tables.proposals.manualDiscount} = ${proposal.manualDiscount}`));
+      .where(
+        and(
+          eq(tables.proposals.id, proposal.id),
+          sql`${tables.proposals.package} = ${JSON.stringify(proposal.package)}::jsonb`,
+          sql`${tables.proposals.manualDiscount} = ${proposal.manualDiscount}`,
+        ),
+      );
     await record(scope, "done", `PDF ready for proposal v${String(proposal.version)}`);
   } catch (error) {
     await record(system, "failed", "The proposal PDF couldn't be generated.").catch(() => undefined);

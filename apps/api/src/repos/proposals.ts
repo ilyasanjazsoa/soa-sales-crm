@@ -46,7 +46,12 @@ export function pricingConfigsRepo(db: Executor) {
 export function proposalsRepo(db: Executor) {
   const base = () =>
     db
-      .select({ proposal: proposals, accountId: deals.accountId, accountName: accounts.name, dealOwner: deals.ownerUserId })
+      .select({
+        proposal: proposals,
+        accountId: deals.accountId,
+        accountName: accounts.name,
+        dealOwner: deals.ownerUserId,
+      })
       .from(proposals)
       .innerJoin(deals, eq(deals.id, proposals.dealId))
       .innerJoin(accounts, eq(accounts.id, deals.accountId));
@@ -80,7 +85,11 @@ export function proposalsRepo(db: Executor) {
       if (row === undefined) throw new Error("insert returned no row");
       return row;
     },
-    async update(_scope: Scope, id: string, values: Partial<typeof proposals.$inferInsert>): Promise<ProposalRow | undefined> {
+    async update(
+      _scope: Scope,
+      id: string,
+      values: Partial<typeof proposals.$inferInsert>,
+    ): Promise<ProposalRow | undefined> {
       const [row] = await db.update(proposals).set(values).where(eq(proposals.id, id)).returning();
       return row;
     },
@@ -98,10 +107,7 @@ export function proposalsRepo(db: Executor) {
         .groupBy(proposalViews.proposalId);
       return new Map(rows.map((row) => [row.id, { count: row.count, last: row.last }]));
     },
-    async recordView(
-      _scope: SystemScope,
-      values: typeof proposalViews.$inferInsert,
-    ): Promise<{ firstToday: boolean }> {
+    async recordView(_scope: SystemScope, values: typeof proposalViews.$inferInsert): Promise<{ firstToday: boolean }> {
       const [today] = await db
         .select({ value: count() })
         .from(proposalViews)
@@ -145,7 +151,11 @@ export function contractsRepo(db: Executor) {
       if (row === undefined) throw new Error("insert returned no row");
       return row;
     },
-    async update(_scope: Scope, id: string, values: Partial<typeof contracts.$inferInsert>): Promise<ContractRow | undefined> {
+    async update(
+      _scope: Scope,
+      id: string,
+      values: Partial<typeof contracts.$inferInsert>,
+    ): Promise<ContractRow | undefined> {
       const [row] = await db.update(contracts).set(values).where(eq(contracts.id, id)).returning();
       return row;
     },
