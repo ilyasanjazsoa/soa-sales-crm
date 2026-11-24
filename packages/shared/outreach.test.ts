@@ -64,6 +64,11 @@ describe("runChecks (email)", () => {
     expect(failed({ subject })).toEqual(["subject_present"]);
   });
 
+  it("blocks addresses outside MAIL_ALLOWLIST (staging)", () => {
+    expect(failed({ allowlist: ["someone@else.example"] })).toEqual(["recipient_ok"]);
+    expect(failed({ allowlist: ["dana@harbor.example"] })).toEqual([]);
+  });
+
   it("allows Re: on a reply in an existing thread", () => {
     expect(failed({ subject: "Re: night coverage", isReply: true })).toEqual([]);
   });

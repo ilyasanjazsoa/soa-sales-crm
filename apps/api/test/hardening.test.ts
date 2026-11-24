@@ -228,7 +228,8 @@ describe("client address behind the load balancer", () => {
 describe("log and repo safeguards", () => {
   it("drops query strings from sign-in and public token URLs in logs", () => {
     expect(urlForLog("/api/auth/callback?code=secret&state=s")).toBe("/api/auth/callback?[redacted]");
-    expect(urlForLog("/u/token?x=1")).toBe("/u/token?[redacted]");
+    expect(urlForLog("/u/token?x=1")).toBe("/u/[redacted]?[redacted]");
+    expect(urlForLog("/u/ZGFuYUBoYXJib3IuZXhhbXBsZQ.sig")).toBe("/u/[redacted]");
     expect(urlForLog("/api/accounts?q=harbor")).toBe("/api/accounts?q=harbor");
   });
 

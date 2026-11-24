@@ -6,6 +6,8 @@ export const JOBS = {
   importRun: "import.run",
   researchFetch: "research.fetch",
   researchBrief: "research.brief",
+  mailSend: "mail.send",
+  mailSync: "mail.sync",
 } as const;
 export type JobName = (typeof JOBS)[keyof typeof JOBS];
 
@@ -13,6 +15,8 @@ export interface JobPayloads {
   "import.run": { importId: string };
   "research.fetch": { accountId: string; userId: string };
   "research.brief": { accountId: string; userId: string };
+  "mail.send": { messageId: string };
+  "mail.sync": { userId: string };
 }
 
 export interface JobQueue {
@@ -21,10 +25,14 @@ export interface JobQueue {
 }
 
 /** Retries per job (§14): import.run is resumable by row and is not retried automatically. */
-export const JOB_OPTIONS: Record<JobName, { retryLimit: number }> = {
+export const JOB_OPTIONS: Record<JobName, { retryLimit: number; retryBackoff?: boolean; retryDelay?: number }> = {
   "import.run": { retryLimit: 0 },
   "research.fetch": { retryLimit: 2 },
   "research.brief": { retryLimit: 1 },
+  // 3 retries, exponential; permanent errors fail at once (§14).
+  "mail.send": { retryLimit: 3, retryBackoff: true, retryDelay: 30 },
+  // The next tick is the retry.
+  "mail.sync": { retryLimit: 0 },
 };
 
 export async function createPgBossQueue(databaseUrl: string): Promise<JobQueue & { boss: PgBoss }> {
@@ -35,7 +43,9 @@ export async function createPgBossQueue(databaseUrl: string): Promise<JobQueue &
   return {
     boss,
     async send(name, data) {
-      await boss.send(name, data, JOB_OPTIONS[name]);
+      // One sync per user at a time: a tick while the last one is still queued is dropped.
+      const singleton = name === "mail.sync" ? { singletonKey: (data as { userId: string }).userId } : {};
+      await boss.send(name, data, { ...JOB_OPTIONS[name], ...singleton });
     },
     async stop() {
       await boss.stop({ graceful: true });

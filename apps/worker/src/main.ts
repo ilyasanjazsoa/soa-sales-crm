@@ -1,6 +1,8 @@
 import {
   createFakeWebFetcher,
   createPgBossQueue,
+  createTokenCipher,
+  createWorkerMail,
   createS3ObjectStore,
   createWebFetcher,
   createWorkerAi,
@@ -8,6 +10,9 @@ import {
   runImport,
   runResearchBrief,
   runResearchFetch,
+  runMailSend,
+  runMailSync,
+  syncableUsers,
   systemClock,
 } from "@soa/api/jobs";
 import { APP_ROLE, createDb } from "@soa/db";
@@ -80,10 +85,56 @@ await handle(JOBS.researchFetch, (data) =>
   runResearchFetch({ db: database.db, ai, fetcher, clock: systemClock }, data),
 );
 await handle(JOBS.researchBrief, (data) => runResearchBrief({ db: database.db, ai, clock: systemClock }, data));
+
+// ───────── mail (§8.2, §8.4) ─────────
+const mailDeps = {
+  db: database.db,
+  mail: createWorkerMail(config, systemClock),
+  cipher: createTokenCipher(config.TOKEN_ENC_KEY),
+  ai,
+  clock: systemClock,
+  config,
+};
+const MAIL_SEND_RETRIES = 3;
+await queue.boss.work<{ messageId: string }>(JOBS.mailSend, { includeMetadata: true }, async (jobs) => {
+  for (const job of jobs) {
+    log.info({ job: JOBS.mailSend, id: job.id }, "job started");
+    try {
+      await runMailSend(mailDeps, job.data, { finalAttempt: job.retryCount >= MAIL_SEND_RETRIES });
+      log.info({ job: JOBS.mailSend, id: job.id }, "job done");
+    } catch (error) {
+      log.error({ job: JOBS.mailSend, id: job.id, err: failure(error) }, "job failed");
+      throw error;
+    }
+  }
+});
+await queue.boss.work<{ userId: string }>(JOBS.mailSync, async (jobs) => {
+  for (const job of jobs) {
+    try {
+      const result = await runMailSync(mailDeps, job.data);
+      if (result.stored > 0) log.info({ job: JOBS.mailSync, id: job.id, stored: result.stored }, "mail synced");
+    } catch (error) {
+      log.error({ job: JOBS.mailSync, id: job.id, err: failure(error) }, "job failed");
+    }
+  }
+});
+// Every 2 minutes, one sync per connected user. Users who must reconnect are skipped until they do.
+const SYNC_EVERY_MS = 2 * 60 * 1000;
+const tick = async () => {
+  try {
+    for (const userId of await syncableUsers(database.db)) await queue.send(JOBS.mailSync, { userId });
+  } catch (error) {
+    log.error({ job: "mail.sync tick", err: failure(error) }, "tick failed");
+  }
+};
+const syncTimer = setInterval(() => void tick(), SYNC_EVERY_MS);
+void tick();
+
 log.info({ jobs: Object.values(JOBS) }, "worker started");
 
 const shutdown = (signal: string) => {
   log.info({ signal }, "shutting down");
+  clearInterval(syncTimer);
   void queue
     .stop()
     .then(() => database.close())

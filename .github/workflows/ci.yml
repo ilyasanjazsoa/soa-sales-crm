@@ -30,6 +30,11 @@ jobs:
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
+      mailpit:
+        image: axllent/mailpit@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
+        ports:
+          - 1025:1025
+          - 8025:8025
     env:
       DATABASE_URL: postgres://crm:crm@localhost:5432/crm
     steps:
@@ -62,6 +67,14 @@ jobs:
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
+      mailpit:
+        image: axllent/mailpit@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
+        ports:
+          - 1025:1025
+          - 8025:8025
+    env:
+      # Fictional; the real address is DECISIONS.md item F. Process env wins over the generated .env.
+      COMPANY_POSTAL_ADDRESS: "100 Example Plaza, Dallas, TX 75201"
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4

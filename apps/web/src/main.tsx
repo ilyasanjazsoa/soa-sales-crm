@@ -7,6 +7,7 @@ import { Layout } from "./Layout";
 import { AdminPage } from "./pages/Admin";
 import { AccountPage } from "./pages/AccountPage";
 import { AdminReferencesPage } from "./pages/AdminReferences";
+import { AdminSuppressionsPage } from "./pages/AdminSuppressions";
 import { AdminUsersPage } from "./pages/AdminUsers";
 import { ComingPage } from "./pages/Coming";
 import { LoginPage } from "./pages/Login";
@@ -80,16 +81,7 @@ const router = createBrowserRouter([
             ),
           },
           { path: "references", element: <AdminReferencesPage /> },
-          {
-            path: "suppressions",
-            element: (
-              <ComingPage
-                title="Suppression list"
-                milestone={4}
-                what="Addresses the CRM will never email, company-wide."
-              />
-            ),
-          },
+          { path: "suppressions", element: <AdminSuppressionsPage /> },
 
           {
             path: "audit",

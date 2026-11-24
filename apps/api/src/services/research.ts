@@ -1,6 +1,5 @@
 import type { Database } from "@soa/db";
 import {
-  automaticAdvance,
   BriefSection,
   BRIEF_SECTIONS,
   briefProblems,
@@ -10,7 +9,6 @@ import {
   priceSentence,
   ResearchBriefOutput,
   SignalExtractOutput,
-  STAGE_LABELS,
   withoutDollarAmounts,
   type BriefResponse,
   type ClientReference,
@@ -29,11 +27,11 @@ import { FetchRefused, type WebFetcher } from "../providers/web";
 import { accountsRepo } from "../repos/accounts";
 import { auditRepo } from "../repos/audit";
 import { activitiesRepo, contactsRepo, signalsRepo, sourcesRepo } from "../repos/children";
-import { dealsRepo } from "../repos/deals";
 import { referencesRepo, researchRepo, type ReferenceRow, type SourceRow } from "../repos/research";
 import { systemScope, userScope, type Scope, type UserScope } from "../repos/scope";
 import { usersRepo } from "../repos/users";
 import { contentHash } from "./accounts";
+import { advanceDeal } from "./advance";
 import { isoDay, livePricing, recomputeFit } from "./mappers";
 
 /* Research: sources, signals from websites, and the research brief (ARCHITECTURE.md §7.3, §14). Job state
@@ -508,31 +506,7 @@ export async function runResearchBrief(deps: Omit<ResearchJobDeps, "fetcher">, j
         createdBy: scope.userId,
       });
       // First brief saved → researched (§5). Automatic moves only go forward, and only on a deal we can change.
-      const deal = await dealsRepo(tx).currentForAccount(scope, job.accountId);
-      const to = deal === undefined ? null : automaticAdvance(deal.deal, "researched");
-      if (deal !== undefined && to !== null) {
-        const moved = await dealsRepo(tx).update(scope, deal.deal.id, {
-          stage: to,
-          stageChangedAt: now,
-          lastActivityAt: now,
-        });
-        if (moved !== undefined) {
-          await dealsRepo(tx).recordStage(scope, deal.deal.id, deal.deal.stage, to);
-          await activitiesRepo(tx).insert(scope, {
-            accountId: job.accountId,
-            dealId: deal.deal.id,
-            type: "stage_change",
-            subject: `Stage moved from ${STAGE_LABELS[deal.deal.stage]} to ${STAGE_LABELS[to]}`,
-            meta: { from: deal.deal.stage, to, automatic: true, trigger: "research_brief" },
-          });
-          await auditRepo(tx).write(scope, {
-            action: "deal.stage",
-            entityType: "deal",
-            entityId: deal.deal.id,
-            meta: { from: deal.deal.stage, to, automatic: true },
-          });
-        }
-      }
+      await advanceDeal(tx, scope, job.accountId, "researched", "research_brief", now);
       return `Research brief v${String(brief.version)} generated`;
     });
   });

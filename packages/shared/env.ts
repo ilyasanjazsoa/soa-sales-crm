@@ -93,6 +93,9 @@ const EnvSchema = z.object({
   COMPANY_SIGNER_NAME: optional(z.string()),
   COMPANY_SIGNER_EMAIL: optional(email),
   MAIL_ALLOWLIST: optional(emailList),
+  /** FAKE_PROVIDERS only: where the fake mail provider delivers (Mailpit). Defaults to the docker compose ports. */
+  MAILPIT_SMTP_URL: optional(z.string().regex(/^smtp:\/\/[^/]+$/, "must look like smtp://host:port")),
+  MAILPIT_API_URL: optional(httpUrl),
   FAKE_PROVIDERS: required(
     z.enum(["true", "false"], { error: "must be true or false" }).transform((value) => value === "true"),
   ),
