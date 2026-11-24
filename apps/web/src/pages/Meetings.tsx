@@ -1,4 +1,5 @@
 import {
+  BookedMeeting,
   Meeting,
   MeetingList,
   MEETING_KIND_LABELS,
@@ -138,13 +139,17 @@ export function MeetingsTab({ account }: { account: Account }) {
   });
   const book = useMutation({
     mutationFn: (slot: SlotOption) =>
-      api("/api/meetings", Meeting, {
+      api("/api/meetings", BookedMeeting, {
         method: "POST",
         body: { accountId: account.id, kind, start: slot.start, durationMinutes: duration },
       }),
     onSuccess: async (meeting) => {
       setSlots(null);
-      setNotice(`Booked. ${meeting.contacts.length > 0 ? "Calendar invite sent." : "No one was invited."}`);
+      setNotice(
+        meeting.invited
+          ? "Booked. Calendar invite sent."
+          : "Booked in your calendar. No invite was sent (the contact's email can't be used).",
+      );
       setOpenPrep(meeting.id);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["meetings"] }),

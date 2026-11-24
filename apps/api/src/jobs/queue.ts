@@ -42,7 +42,7 @@ export const JOB_OPTIONS: Record<JobName, { retryLimit: number; retryBackoff?: b
 };
 
 /** Syncs are per user and disposable: "stately" keeps at most one queued and one running job per user. */
-const SYNC_QUEUES = new Set<string>(["mail.sync", "calendar.sync"]);
+const SYNC_QUEUES = new Set<string>(["mail.sync", "calendar.sync", "prep.generate"]);
 
 /** The api only sends; the worker passes `supervise: true` so jobs whose worker died are expired and retried. */
 export async function createPgBossQueue(
@@ -65,8 +65,13 @@ export async function createPgBossQueue(
     boss,
     async send(name, data) {
       // One sync per user at a time: a tick while the last one is still queued is dropped.
-      const singleton =
-        name === "mail.sync" || name === "calendar.sync" ? { singletonKey: (data as { userId: string }).userId } : {};
+      const key =
+        name === "mail.sync" || name === "calendar.sync"
+          ? (data as { userId: string }).userId
+          : name === "prep.generate"
+            ? (data as { meetingId: string }).meetingId
+            : undefined;
+      const singleton = key === undefined ? {} : { singletonKey: key };
       await boss.send(name, data, { ...JOB_OPTIONS[name], ...singleton });
     },
     async stop() {

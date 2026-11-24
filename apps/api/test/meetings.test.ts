@@ -1,5 +1,5 @@
 import { APP_ROLE, createDb } from "@soa/db";
-import { Meeting, MeetingList, PrepBriefResponse, SlotResponse } from "@soa/shared";
+import { BookedMeeting, Meeting, MeetingList, PrepBriefResponse, SlotResponse } from "@soa/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTokenCipher } from "../src/auth/crypto";
@@ -10,7 +10,7 @@ import { createFakeCalendarProvider } from "../src/providers/calendar/fake";
 import { createFakeTokenRefresher } from "../src/providers/identity/refresh";
 import { createDriveTimes } from "../src/providers/maps/cache";
 import { createFakeMapsProvider } from "../src/providers/maps/fake";
-import { morningPrepDue, runCalendarSync, runPrepGenerate } from "../src/services/meetings";
+import { morningPrepDue, queueMorningPrep, runCalendarSync, runPrepGenerate } from "../src/services/meetings";
 import { testDatabaseUrl } from "./db-setup";
 import { createUser, ownerQuery, resetDatabase, signIn, testApp, type SignedIn, type TestUser } from "./helpers";
 
@@ -25,12 +25,17 @@ const queue = createMemoryQueue();
 const adapter = createFakeAiAdapter();
 const as = (who: SignedIn = session) => ({ cookies: who.cookies, headers: who.headers });
 
-async function start(options: { mapsFail?: boolean } = {}) {
+/** Monday 2 March 2026, 9:00 am in Chicago: slot results don't depend on the day the tests run. */
+const NOW = new Date("2026-03-02T15:00:00Z");
+const clock = () => NOW;
+
+async function start(options: { mapsFail?: boolean; calendar?: typeof calendar.provider } = {}) {
   app = await testApp({
     env: { TOKEN_ENC_KEY },
+    clock,
     queue,
     aiAdapter: adapter,
-    calendar: calendar.provider,
+    calendar: options.calendar ?? calendar.provider,
     maps: createFakeMapsProvider({ fail: options.mapsFail === true }),
   });
   session = await signIn(app, ae.email);
@@ -95,10 +100,10 @@ function workerDeps() {
         clock: () => new Date(),
       }),
       calendar: calendar.provider,
-      driveTimes: createDriveTimes(createFakeMapsProvider(), () => new Date()),
+      driveTimes: createDriveTimes(createFakeMapsProvider(), clock),
       refresher: createFakeTokenRefresher(),
       cipher: createTokenCipher(TOKEN_ENC_KEY),
-      clock: () => new Date(),
+      clock,
     },
   };
 }
@@ -225,7 +230,7 @@ describe("GET /meetings", () => {
   it("never shows another rep's non-CRM event titles", async () => {
     const other = await createUser("lee@soa.example", "ae");
     const manager = await createUser("max@soa.example", "manager");
-    const now = Date.now();
+    const now = NOW.getTime();
     calendar.events.add(ae.id, {
       title: "Secret lunch with a competitor",
       start: new Date(now + 3600_000),
@@ -285,5 +290,106 @@ describe("outcomes and the 6 am prep", () => {
     expect(await morningPrepDue(handle.db, new Date("2026-03-03T12:10:00Z"))).toEqual([row?.id]); // 6:10 am
     expect(await morningPrepDue(handle.db, new Date("2026-03-02T12:10:00Z"))).toEqual([]); // the day before
     await handle.close();
+  });
+});
+
+describe("review fixes", () => {
+  it("marks slots estimated when the account can't be geocoded because the maps service is down", async () => {
+    await app.close();
+    await start({ mapsFail: true }); // nothing stored: geocoding itself fails
+    const slots = await findTimes();
+    expect(slots.length).toBeGreaterThan(0);
+    for (const slot of slots) {
+      expect(slot.estimated).toBe(true);
+      expect(slot.reasons).toContain("Drive time not included: the map service is unavailable");
+    }
+  });
+
+  it("treats phone and online events as no place to drive from", async () => {
+    calendar.events.add(ae.id, {
+      title: "Call with a supplier",
+      start: new Date("2026-03-03T15:00:00Z"),
+      end: new Date("2026-03-03T15:30:00Z"),
+      location: "Microsoft Teams Meeting",
+    });
+    const slots = await findTimes();
+    expect(slots.flatMap((slot) => slot.reasons).join(" ")).not.toContain("Call with a supplier");
+  });
+
+  it("still lists CRM meetings when the calendar can't be read", async () => {
+    await app.close();
+    const broken = { ...calendar.provider, listEvents: () => Promise.reject(new Error("Graph 503")) };
+    await start({ calendar: broken });
+    await ownerQuery(
+      "INSERT INTO meetings (account_id, owner_user_id, title, kind, starts_at, ends_at) VALUES ($1, $2, 'Call', 'call', $3, $4)",
+      [accountId, ae.id, new Date("2026-03-04T15:00:00Z"), new Date("2026-03-04T15:30:00Z")],
+    );
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/meetings?from=${encodeURIComponent("2026-03-01T00:00:00Z")}&to=${encodeURIComponent("2026-03-08T00:00:00Z")}`,
+      ...as(),
+    });
+    expect(response.statusCode).toBe(200);
+    const body = MeetingList.parse(response.json());
+    expect(body.calendarRead).toBe(false);
+    expect(body.meetings).toHaveLength(1);
+  });
+
+  it("doesn't invite a do-not-contact account's contact, and says so", async () => {
+    await ownerQuery("UPDATE accounts SET do_not_contact = true");
+    const [slot] = await findTimes("call");
+    const booked = BookedMeeting.parse((await book(slot?.start ?? "", "call")).json());
+    expect(booked.invited).toBe(false);
+  });
+
+  it("asks for the morning prep once per meeting, even when it fails", async () => {
+    const meetingStart = new Date("2026-03-03T19:00:00Z"); // 1 pm in Chicago
+    await ownerQuery(
+      "INSERT INTO meetings (account_id, owner_user_id, title, kind, starts_at, ends_at) VALUES ($1, $2, 'Call', 'call', $3, $4)",
+      [accountId, ae.id, meetingStart, new Date(meetingStart.getTime() + 1800_000)],
+    );
+    const { handle } = workerDeps();
+    const jobs = createMemoryQueue();
+    expect(await queueMorningPrep(handle.db, jobs, new Date("2026-03-03T12:10:00Z"))).toBe(1);
+    // The job failed (no prep stored); five minutes later nothing is asked again.
+    expect(await queueMorningPrep(handle.db, jobs, new Date("2026-03-03T12:15:00Z"))).toBe(0);
+    expect(await queueMorningPrep(handle.db, jobs, new Date("2026-03-03T18:00:00Z"))).toBe(0);
+    await handle.close();
+    expect(jobs.sent).toHaveLength(1);
+  });
+
+  it("checks moves and outcomes", async () => {
+    const slots = await findTimes("call");
+    const first = Meeting.parse((await book(slots[0]?.start ?? "", "call")).json());
+    const second = Meeting.parse((await book(slots[1]?.start ?? "", "call")).json());
+    const patch = (payload: Record<string, string>) =>
+      app.inject({ method: "PATCH", url: `/api/meetings/${first.id}`, ...as(), payload });
+    expect((await patch({ status: "done" })).statusCode).toBe(409); // not started yet
+    expect((await patch({ startsAt: second.startsAt, endsAt: second.endsAt })).statusCode).toBe(409); // taken
+    expect((await patch({ status: "cancelled", startsAt: second.startsAt, endsAt: second.endsAt })).statusCode).toBe(
+      400,
+    );
+  });
+
+  it("writes an audit row when the calendar moves a meeting, and dates in the rep's time zone", async () => {
+    await ownerQuery("UPDATE users SET timezone = 'America/Los_Angeles' WHERE id = $1", [ae.id]);
+    const [slot] = await findTimes("call");
+    const meeting = Meeting.parse((await book(slot?.start ?? "", "call")).json());
+    const [row] = await ownerQuery<{ provider_event_id: string }>("SELECT provider_event_id FROM meetings");
+    // 4:30 pm in Los Angeles on Tuesday 3 March is already Wednesday in UTC.
+    const later = new Date("2026-03-04T00:30:00Z");
+    calendar.events.move(row?.provider_event_id ?? "", later, new Date(later.getTime() + 1800_000));
+    const { handle, deps } = workerDeps();
+    await runCalendarSync(deps, { userId: ae.id });
+    await handle.close();
+    const [moved] = await ownerQuery<{ subject: string }>(
+      "SELECT subject FROM activities WHERE meta->>'fromCalendar' = 'true'",
+    );
+    expect(moved?.subject).toContain("4:30 pm, 2026-03-03");
+    const audit = await ownerQuery<{ action: string }>(
+      "SELECT action FROM audit_log WHERE entity_id = $1 ORDER BY created_at",
+      [meeting.id],
+    );
+    expect(audit.map((entry) => entry.action)).toEqual(["meeting.book", "meeting.move"]);
   });
 });

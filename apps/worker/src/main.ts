@@ -4,7 +4,7 @@ import {
   createFakeWebFetcher,
   createMapsProvider,
   createTokenRefresher,
-  morningPrepDue,
+  queueMorningPrep,
   runCalendarSync,
   runPrepGenerate,
   createPgBossQueue,
@@ -167,9 +167,7 @@ const CALENDAR_EVERY_MS = 5 * 60 * 1000;
 const calendarTick = async () => {
   try {
     for (const userId of await syncableUsers(database.db)) await queue.send(JOBS.calendarSync, { userId });
-    for (const meetingId of await morningPrepDue(database.db, systemClock())) {
-      await queue.send(JOBS.prepGenerate, { meetingId });
-    }
+    await queueMorningPrep(database.db, queue, systemClock());
   } catch (error) {
     log.error({ job: "calendar tick", err: failure(error) }, "tick failed");
   }

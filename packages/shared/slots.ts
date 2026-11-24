@@ -36,7 +36,8 @@ export interface SlotInput {
   busy: readonly BusyEvent[];
   /** Contact preference text, e.g. "Best reached by phone after 2 pm". */
   preference: string | null;
-  driveMinutes: (from: LatLng, to: LatLng) => Drive;
+  /** Drive time leaving at `departAt` (the caller fills this from the maps provider, by time of day). */
+  driveMinutes: (from: LatLng, to: LatLng, departAt: Date) => Drive;
   /** How many business days to look ahead (default 10). */
   businessDays?: number;
   /** How many slots to return (default 3). */
@@ -122,12 +123,21 @@ export function formatTime(date: Date, timeZone: string): string {
   return `${String(hour)}:${String(p.minute).padStart(2, "0")} ${suffix}`;
 }
 
-/** "morning" / "afternoon" from preference text, if it states one. */
+/** "morning" / "afternoon" from preference text, if it clearly states one; null when unsure (no bonus or penalty). */
 export function timePreference(text: string | null): "morning" | "afternoon" | null {
   if (text === null) return null;
-  if (/\b(afternoons?|after (1[0-2]|[1-5])\s*(pm)?\b|after lunch|\d\s*pm\b)/i.test(text)) return "afternoon";
-  if (/\b(mornings?|before (noon|lunch|1[01]|[7-9])|early|\d\s*am\b)/i.test(text)) return "morning";
-  return null;
+  // "no mornings", "not in the afternoon", "avoid afternoons": a negation flips it.
+  const negated = /\b(no|not|never|avoid|except)\s+(in\s+the\s+)?(mornings?|afternoons?)\b/i.exec(text);
+  if (negated !== null) return /morning/i.test(negated[3] ?? "") ? "afternoon" : "morning";
+  const afternoon =
+    /\bafternoons?\b|\bafter lunch\b|\bafter (12|[1-5])(:\d\d)?\s*(pm|p\.m\.)?(?!\s*(am|a\.m\.))\b|\bfrom (12|[1-5])(:\d\d)?\s*pm\b/i.test(
+      text,
+    );
+  const morning = /\bmornings?\b|\bbefore (noon|lunch)\b|\bbefore (9|10|11)(:\d\d)?\s*(am|a\.m\.)?\b|\bearly\b/i.test(
+    text,
+  );
+  if (afternoon === morning) return null;
+  return afternoon ? "afternoon" : "morning";
 }
 
 // ───────── the slot finder ─────────
@@ -176,7 +186,7 @@ export function slotCandidates(input: SlotInput): Candidate[] {
         const previous = [...located].reverse().find((event) => event.end <= start && event.end.getTime() >= dayStart);
         const origin = previous?.location ?? input.base;
         if (origin !== null) {
-          const drive = input.driveMinutes(origin, input.site);
+          const drive = input.driveMinutes(origin, input.site, previous?.end ?? start);
           driveIn = drive.minutes;
           estimated ||= drive.estimated;
           if (previous !== undefined && previous.end.getTime() + driveIn * MINUTE > start.getTime()) continue;
@@ -188,7 +198,7 @@ export function slotCandidates(input: SlotInput): Candidate[] {
         }
         const next = located.find((event) => event.start >= end && event.start.getTime() <= dayEnd);
         if (next !== undefined) {
-          const drive = input.driveMinutes(input.site, next.location);
+          const drive = input.driveMinutes(input.site, next.location, end);
           driveOut = drive.minutes;
           estimated ||= drive.estimated;
           if (end.getTime() + driveOut * MINUTE > next.start.getTime()) continue;

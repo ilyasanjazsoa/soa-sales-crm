@@ -117,6 +117,10 @@ describe("findSlots", () => {
     expect(morning.every((slot) => Number(local(slot.start).split(", ")[2]?.split(":")[0]) < 12)).toBe(true);
     expect(timePreference("call before noon")).toBe("morning");
     expect(timePreference("prefers email")).toBeNull();
+    expect(timePreference("after 10 am")).toBeNull();
+    expect(timePreference("anytime before 5 pm")).toBeNull();
+    expect(timePreference("no mornings please")).toBe("afternoon");
+    expect(timePreference("Best reached by phone after 2 pm")).toBe("afternoon");
   });
 
   it("rolls a Friday afternoon request into next week", () => {
