@@ -1,6 +1,6 @@
 import { tables, type Executor } from "@soa/db";
 import { and, eq, lt, or } from "drizzle-orm";
-import type { Scope, SystemScope, UserScope } from "./scope";
+import { isAdmin, type Scope, type SystemScope, type UserScope } from "./scope";
 
 const { sessions, users, oauthAccounts } = tables;
 
@@ -58,7 +58,11 @@ export function authRepo(db: Executor) {
       await db.delete(sessions).where(eq(sessions.idHash, idHash));
     },
 
-    async deleteSessionsForUser(_scope: Scope, userId: string): Promise<void> {
+    /** Admins (and the system) may end anyone's sessions; a user only their own. */
+    async deleteSessionsForUser(scope: Scope, userId: string): Promise<void> {
+      if (!isAdmin(scope) && scope.kind === "user" && scope.userId !== userId) {
+        throw new Error("scope may not end another user's sessions");
+      }
       await db.delete(sessions).where(eq(sessions.userId, userId));
     },
 
@@ -66,14 +70,40 @@ export function authRepo(db: Executor) {
       await db.delete(sessions).where(or(lt(sessions.expiresAt, now), lt(sessions.lastSeenAt, idleBefore)));
     },
 
+    /** The user an identity-provider account is already bound to. */
+    async findOAuthBySubject(
+      _scope: SystemScope,
+      provider: "microsoft" | "google",
+      subject: string,
+    ): Promise<{ userId: string } | undefined> {
+      const [row] = await db
+        .select({ userId: oauthAccounts.userId })
+        .from(oauthAccounts)
+        .where(and(eq(oauthAccounts.provider, provider), eq(oauthAccounts.subject, subject)));
+      return row;
+    },
+
+    async findOAuthForUser(
+      _scope: SystemScope,
+      userId: string,
+      provider: "microsoft" | "google",
+    ): Promise<{ subject: string } | undefined> {
+      const [row] = await db
+        .select({ subject: oauthAccounts.subject })
+        .from(oauthAccounts)
+        .where(and(eq(oauthAccounts.userId, userId), eq(oauthAccounts.provider, provider)));
+      return row;
+    },
+
+    /** Stores tokens for a user's bound account. The subject never changes once bound (checked by the caller). */
     async upsertOAuthAccount(_scope: SystemScope, account: OAuthAccountWrite): Promise<void> {
       await db
         .insert(oauthAccounts)
         .values({ ...account, needsReconnect: false })
         .onConflictDoUpdate({
           target: [oauthAccounts.userId, oauthAccounts.provider],
+          setWhere: eq(oauthAccounts.subject, account.subject),
           set: {
-            subject: account.subject,
             scopes: account.scopes,
             accessTokenEnc: account.accessTokenEnc,
             refreshTokenEnc: account.refreshTokenEnc,

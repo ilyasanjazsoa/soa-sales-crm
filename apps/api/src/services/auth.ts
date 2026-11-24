@@ -1,4 +1,4 @@
-import type { Database } from "@soa/db";
+import type { Database, Executor } from "@soa/db";
 import type { Env, Role } from "@soa/shared";
 import { z } from "zod";
 import { hmac, randomToken, sha256Base64Url, sha256Hex, sign, verify, type TokenCipher } from "../auth/crypto";
@@ -7,7 +7,7 @@ import type { IdentityProvider } from "../providers/identity/types";
 import { auditRepo } from "../repos/audit";
 import { authRepo } from "../repos/auth";
 import { systemScope, userScope, type UserScope } from "../repos/scope";
-import { usersRepo } from "../repos/users";
+import { usersRepo, type UserRow } from "../repos/users";
 
 /* Sign-in, sessions and CSRF (ARCHITECTURE.md §15). */
 
@@ -29,7 +29,8 @@ export interface ResolvedSession {
   idHash: string;
 }
 
-export type LoginRefusal = "invalid_state" | "provider_error" | "domain" | "unknown_user" | "inactive";
+export type LoginRefusal =
+  "invalid_state" | "provider_error" | "domain" | "unknown_user" | "inactive" | "identity_mismatch";
 
 export type LoginResult =
   { ok: true; sessionToken: string; csrfToken: string; userId: string } | { ok: false; reason: LoginRefusal };
@@ -46,6 +47,15 @@ export interface AuthServiceDeps {
 
 export type AuthService = ReturnType<typeof createAuthService>;
 
+/** The kind of provider failure, never its message (which can echo request data). */
+const errorKind = (error: unknown): string => {
+  if (error instanceof Error) {
+    const code = (error as Error & { code?: unknown }).code;
+    return typeof code === "string" ? `${error.name}:${code}` : error.name;
+  }
+  return typeof error;
+};
+
 export function createAuthService({ db, config, clock, identity, cipher }: AuthServiceDeps) {
   const redirectUri = new URL("/api/auth/callback", config.APP_URL).toString();
   const stateKey = `login-state:${config.SESSION_SECRET}`;
@@ -53,11 +63,12 @@ export function createAuthService({ db, config, clock, identity, cipher }: AuthS
   const system = systemScope("auth");
 
   const refuse = async (
+    executor: Executor,
     reason: LoginRefusal,
     meta: Record<string, unknown>,
     ip: string | null,
   ): Promise<LoginResult> => {
-    await auditRepo(db).write(system, { action: "auth.refused", meta: { reason, ...meta }, ip });
+    await auditRepo(executor).write(system, { action: "auth.refused", meta: { reason, ...meta }, ip });
     return { ok: false, reason };
   };
 
@@ -94,7 +105,7 @@ export function createAuthService({ db, config, clock, identity, cipher }: AuthS
       );
       const returnedState = input.callbackUrl.searchParams.get("state");
       if (!saved.success || saved.data.exp < clock().getTime() || saved.data.state !== returnedState) {
-        return refuse("invalid_state", {}, input.ip);
+        return refuse(db, "invalid_state", {}, input.ip);
       }
 
       let identityResult;
@@ -107,17 +118,31 @@ export function createAuthService({ db, config, clock, identity, cipher }: AuthS
           redirectUri,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "unknown";
-        return refuse("provider_error", { error: message.slice(0, 200) }, input.ip);
+        return refuse(db, "provider_error", { error: errorKind(error) }, input.ip);
       }
 
       const email = identityResult.email.toLowerCase();
-      if (!email.endsWith(`@${config.ALLOWED_EMAIL_DOMAIN}`)) return refuse("domain", { email }, input.ip);
+      if (!email.endsWith(`@${config.ALLOWED_EMAIL_DOMAIN}`)) return refuse(db, "domain", { email }, input.ip);
 
       return db.transaction(async (tx): Promise<LoginResult> => {
         const users = usersRepo(tx);
-        let user = await users.findByEmail(system, email);
-        if (user === undefined && email === config.BOOTSTRAP_ADMIN_EMAIL) {
+        const repo = authRepo(tx);
+
+        // An identity already bound to a user signs in as that user, whatever its email says now.
+        const bound = await repo.findOAuthBySubject(system, identity.provider, identityResult.subject);
+        let user: UserRow | undefined =
+          bound === undefined ? await users.findByEmail(system, email) : await users.findById(system, bound.userId);
+
+        if (bound === undefined && user !== undefined) {
+          // First sign-in by email. If this user is already bound to a different identity, refuse.
+          const existing = await repo.findOAuthForUser(system, user.id, identity.provider);
+          if (existing !== undefined && existing.subject !== identityResult.subject) {
+            return refuse(tx, "identity_mismatch", { email }, input.ip);
+          }
+        }
+
+        // The first admin comes from BOOTSTRAP_ADMIN_EMAIL, and only while there is no admin at all.
+        if (user === undefined && email === config.BOOTSTRAP_ADMIN_EMAIL && (await users.countAdmins(system)) === 0) {
           const created = await users.insertIfAbsent(system, {
             email,
             name: identityResult.name,
@@ -135,13 +160,12 @@ export function createAuthService({ db, config, clock, identity, cipher }: AuthS
           }
           user = created ?? (await users.findByEmail(system, email));
         }
-        if (user === undefined) return refuse("unknown_user", { email }, input.ip);
-        if (!user.active) return refuse("inactive", { email }, input.ip);
+        if (user === undefined) return refuse(tx, "unknown_user", { email }, input.ip);
+        if (!user.active) return refuse(tx, "inactive", { email }, input.ip);
 
         const now = clock();
         const sessionToken = randomToken(32);
         const idHash = sha256Hex(sessionToken);
-        const repo = authRepo(tx);
         await repo.upsertOAuthAccount(system, {
           userId: user.id,
           provider: identity.provider,
@@ -189,6 +213,11 @@ export function createAuthService({ db, config, clock, identity, cipher }: AuthS
         user: { id: user.id, email: user.email, name: user.name, role: user.role },
         scope: userScope(user.id, user.role),
       };
+    },
+
+    /** Ends whatever session a cookie names (used when signing in again on the same browser). */
+    async endSessionByToken(token: string): Promise<void> {
+      await authRepo(db).deleteSession(system, sha256Hex(token));
     },
 
     async logout(session: ResolvedSession, ip: string | null): Promise<void> {

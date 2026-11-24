@@ -1,6 +1,6 @@
 import type { Env } from "@soa/shared";
 import type { FastifyInstance } from "fastify";
-import { clearSessionCookies, sessionOf, setSessionCookies } from "../auth/plugin";
+import { clearSessionCookies, SESSION_COOKIE, sessionOf, setSessionCookies } from "../auth/plugin";
 import { SESSION_MAX_MS, type AuthService } from "../services/auth";
 
 const STATE_COOKIE = "login_state";
@@ -24,6 +24,9 @@ export function registerAuthRoutes(app: FastifyInstance, deps: { auth: AuthServi
       userAgent: request.headers["user-agent"] ?? null,
     });
     void reply.clearCookie(STATE_COOKIE, stateCookieOptions);
+    // Signing in again on this browser ends the previous session.
+    const previous = request.cookies[SESSION_COOKIE];
+    if (result.ok && previous !== undefined) await auth.endSessionByToken(previous);
     if (!result.ok) return reply.redirect(loginPage(result.reason === "invalid_state" ? "expired" : "not_allowed"));
     setSessionCookies(reply, result.sessionToken, result.csrfToken, SESSION_MAX_MS / 1000);
     return reply.redirect(new URL("/", config.APP_URL).toString());

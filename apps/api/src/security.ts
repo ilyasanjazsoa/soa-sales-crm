@@ -1,7 +1,6 @@
-import rateLimit from "@fastify/rate-limit";
 import type { FastifyInstance } from "fastify";
-import { sha256Hex } from "./auth/crypto";
-import { SESSION_COOKIE } from "./auth/plugin";
+import type { Clock } from "./clock";
+import { HttpError } from "./errors";
 
 /* Security headers and rate limits (ARCHITECTURE.md §15). */
 
@@ -34,16 +33,27 @@ export function registerSecurityHeaders(app: FastifyInstance): void {
   });
 }
 
-/** 300 requests a minute per session on /api (per IP before sign-in). Public routes get their own limit later. */
-export async function registerRateLimits(app: FastifyInstance, options: { apiPerMinute?: number } = {}): Promise<void> {
-  await app.register(rateLimit, {
-    global: true,
-    max: options.apiPerMinute ?? 300,
-    timeWindow: "1 minute",
-    allowList: (request) => !request.url.startsWith("/api/"),
-    keyGenerator: (request) => {
-      const token = request.cookies[SESSION_COOKIE];
-      return token === undefined ? `ip:${request.ip}` : `session:${sha256Hex(token)}`;
-    },
-  });
+export const rateLimited = () => new HttpError(429, "rate_limited", "Too many requests. Try again shortly.");
+
+/** Fixed one-minute windows, in memory. Each api task counts on its own (two tasks in production). */
+export class RateLimiter {
+  private window = 0;
+  private counts = new Map<string, number>();
+
+  constructor(
+    private readonly perMinute: number,
+    private readonly clock: Clock,
+  ) {}
+
+  /** Counts a request; false when the key is over its limit for this minute. */
+  hit(key: string): boolean {
+    const window = Math.floor(this.clock().getTime() / 60_000);
+    if (window !== this.window) {
+      this.window = window;
+      this.counts = new Map();
+    }
+    const next = (this.counts.get(key) ?? 0) + 1;
+    this.counts.set(key, next);
+    return next <= this.perMinute;
+  }
 }

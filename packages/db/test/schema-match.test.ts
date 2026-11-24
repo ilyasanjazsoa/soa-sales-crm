@@ -19,7 +19,8 @@ const CATALOG_QUERIES = {
   columns: `
     SELECT c.relname AS table, a.attnum AS position, a.attname AS column,
            format_type(a.atttypid, a.atttypmod) AS type, a.attnotnull AS not_null,
-           pg_get_expr(d.adbin, d.adrelid) AS default
+           pg_get_expr(d.adbin, d.adrelid) AS default, a.attcollation::regcollation::text AS collation,
+           a.attidentity AS identity, a.attgenerated AS generated
     FROM pg_attribute a
     JOIN pg_class c ON c.oid = a.attrelid
     LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
@@ -31,7 +32,17 @@ const CATALOG_QUERIES = {
     WHERE connamespace = 'public'::regnamespace AND contype IN ('p', 'u', 'f', 'c', 'x')
     ORDER BY 1, 2`,
   indexes: `SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' ORDER BY 1, 2`,
-  sequences: `SELECT sequencename, data_type FROM pg_sequences WHERE schemaname = 'public' ORDER BY 1`,
+  sequences: `SELECT sequencename, data_type, start_value, increment_by, cycle FROM pg_sequences WHERE schemaname = 'public' ORDER BY 1`,
+  relations: `SELECT relname, relkind FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'v', 'm', 'p', 'f') ORDER BY 1`,
+  views: `SELECT viewname, definition FROM pg_views WHERE schemaname = 'public' ORDER BY 1`,
+  triggers: `SELECT tgrelid::regclass::text AS table, tgname, pg_get_triggerdef(oid) AS definition FROM pg_trigger WHERE NOT tgisinternal ORDER BY 1, 2`,
+  policies: `SELECT tablename, policyname, cmd, qual, with_check FROM pg_policies WHERE schemaname = 'public' ORDER BY 1, 2`,
+  rowSecurity: `SELECT relname, relrowsecurity FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' ORDER BY 1`,
+  functions: `SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args FROM pg_proc p
+              WHERE p.pronamespace = 'public'::regnamespace
+                AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
+              ORDER BY 1, 2`,
+  extensionVersions: `SELECT extname, extversion FROM pg_extension ORDER BY 1`,
 } as const;
 
 type Snapshot = Record<keyof typeof CATALOG_QUERIES, unknown[]>;

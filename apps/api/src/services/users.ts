@@ -12,7 +12,7 @@ import { conflict, notFound, unprocessable } from "../errors";
 import { auditRepo } from "../repos/audit";
 import { authRepo } from "../repos/auth";
 import type { UserScope } from "../repos/scope";
-import { usersRepo, type UserPatch, type UserRow } from "../repos/users";
+import { usersRepo, type ProfilePatch, type UserRow } from "../repos/users";
 
 const hhmm = (time: string) => time.slice(0, 5);
 
@@ -73,7 +73,7 @@ export function createUsersService({ db, config }: { db: Database; config: Env }
         const start = body.workdayStart ?? hhmm(current.workdayStart);
         const end = body.workdayEnd ?? hhmm(current.workdayEnd);
         if (start >= end) throw unprocessable("invalid_hours", "The workday must start before it ends.");
-        const patch: UserPatch = {};
+        const patch: ProfilePatch = {};
         if (body.name !== undefined) patch.name = body.name;
         if (body.title !== undefined) patch.title = body.title;
         if (body.phone !== undefined) patch.phone = body.phone === "" ? null : body.phone;

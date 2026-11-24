@@ -19,12 +19,12 @@ export function registerUserRoutes(
 ): void {
   const { users, audit, auth } = deps;
 
-  app.get("/api/me", async (request) => {
+  app.get("/api/me", { config: { access: "session" } }, async (request) => {
     const session = sessionOf(request);
     return users.me(session.scope, auth.csrfFor(session.idHash));
   });
 
-  app.patch("/api/me", async (request) => {
+  app.patch("/api/me", { config: { access: "session" } }, async (request) => {
     const session = sessionOf(request);
     return { user: await users.updateProfile(session.scope, UpdateMeRequest.parse(request.body), request.ip) };
   });

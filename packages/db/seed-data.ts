@@ -43,7 +43,7 @@ const NAME_PARTS: Record<(typeof PROPERTY_TYPES)[number], [string[], string]> = 
   "Cold chain warehouse": [["Northwind", "Glacier Point", "Frostline", "Polar Ridge"], "Cold Storage"],
   "Medical office": [["Cedar Hollow", "Willowbend", "Stonebriar", "Brookhaven"], "Medical Pavilion"],
   "Construction site": [["Summit Row", "Elm Fork", "Trinity Bend", "Canyon Creek"], "Tower (construction)"],
-  "Class A office": [["Harborview", "Meridian Point", "Lakeshore", "Oakcrest"], "Plaza"],
+  "Class A office": [["Harborview", "Cobalt Point", "Lakeshore", "Oakcrest"], "Plaza"],
   "Data center": [["Quartz Valley", "Silverline", "Copperfield", "Granite Run"], "Data Campus"],
   Multifamily: [["Magnolia", "Sycamore", "Larkspur", "Juniper"], "Residences"],
   Hospitality: [["Bayberry", "Pecan Grove", "Rosewood Lane", "Clearwater"], "Hotel"],

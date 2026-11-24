@@ -26,13 +26,30 @@ const expectForbidden = (response: LightMyRequestResponse) => {
   expect(response.statusCode).toBe(403);
 };
 
+/** A successful response that contains nothing of the first AE's: user, account id or account name. */
 const expectNothingOf = (response: LightMyRequestResponse, ctx: Context) => {
   expect(response.statusCode).toBeLessThan(300);
-  expect(response.body).not.toContain(ctx.ae1.id);
-  expect(response.body).not.toContain(ctx.ae1.email);
+  for (const secret of [ctx.ae1.id, ctx.ae1.email, ctx.ae1AccountId, AE1_ACCOUNT_NAME]) {
+    expect(response.body).not.toContain(secret);
+  }
 };
 
+const AE1_ACCOUNT_NAME = "First AE Logistics Park";
+
+/* Changing either list needs a security review: these are the only routes reachable without a session. */
+const PUBLIC_ROUTES = new Set([
+  "GET /healthz",
+  "GET /readyz",
+  "GET /api/auth/login",
+  "GET /api/auth/callback",
+  "GET /api/auth/fake-idp",
+  "POST /api/auth/fake-idp",
+]);
+const NON_API_ROUTES = new Set(["GET /healthz", "GET /readyz"]);
+
 const ROUTES: Record<string, RouteCase> = {
+  "GET /healthz": { access: "public", path: () => "/healthz" },
+  "GET /readyz": { access: "public", path: () => "/readyz" },
   "GET /api/auth/login": { access: "public", path: () => "/api/auth/login" },
   "GET /api/auth/callback": { access: "public", path: () => "/api/auth/callback" },
   "GET /api/auth/fake-idp": { access: "public", path: () => "/api/auth/fake-idp" },
@@ -79,7 +96,7 @@ describe("route authorization (every /api route)", () => {
     await resetDatabase();
     const ae1 = await createUser("first.ae@soa.example");
     const ae2 = await createUser("second.ae@soa.example");
-    ctx = { ae1, ae2, ae1AccountId: await createAccount("First AE Logistics Park", ae1.id) };
+    ctx = { ae1, ae2, ae1AccountId: await createAccount(AE1_ACCOUNT_NAME, ae1.id) };
     app = await testApp();
     ae1Session = await signIn(app, ae1.email);
     ae2Session = await signIn(app, ae2.email);
@@ -89,12 +106,15 @@ describe("route authorization (every /api route)", () => {
     await app.close();
   });
 
-  it("covers every registered /api route, and nothing else", () => {
-    const registered = app.routeRegistry.filter((route) => route.url.startsWith("/api/"));
+  it("covers every registered route, and nothing else", () => {
+    const registered = app.routeRegistry;
     const registeredKeys = registered.map((route) => keyOf(route.method, route.url)).sort();
     expect(registeredKeys).toEqual(Object.keys(ROUTES).sort());
     for (const route of registered) {
-      expect(route.access, keyOf(route.method, route.url)).toBe(ROUTES[keyOf(route.method, route.url)]?.access);
+      const key = keyOf(route.method, route.url);
+      expect(route.access, key).toBe(ROUTES[key]?.access);
+      if (!route.url.startsWith("/api/")) expect(NON_API_ROUTES.has(key), `${key} is outside /api`).toBe(true);
+      if (route.access === "public") expect(PUBLIC_ROUTES.has(key), `${key} is public but not allow-listed`).toBe(true);
     }
   });
 

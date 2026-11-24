@@ -61,6 +61,29 @@ export async function pingDatabase(pool: pg.Pool, timeoutMs = 2_000): Promise<bo
   }
 }
 
+/** Why this connection's login could bypass the app role's restrictions (empty when it can't). */
+export async function appRoleProblems(pool: pg.Pool): Promise<string[]> {
+  const { rows } = await pool.query<{
+    superuser: boolean;
+    owner: boolean;
+    can_update_audit: boolean;
+    member: boolean;
+  }>(`
+    SELECT r.rolsuper AS superuser,
+           pg_has_role(session_user, (SELECT tableowner FROM pg_tables WHERE schemaname = 'public' AND tablename = 'audit_log'), 'MEMBER') AS owner,
+           has_table_privilege(session_user, 'public.audit_log', 'UPDATE') AS can_update_audit,
+           pg_has_role(session_user, '${APP_ROLE}', 'MEMBER') AS member
+    FROM pg_roles r WHERE r.rolname = session_user`);
+  const row = rows[0];
+  if (row === undefined) return ["unknown login role"];
+  const problems: string[] = [];
+  if (row.superuser) problems.push("the login is a superuser");
+  if (row.owner) problems.push("the login owns the schema");
+  if (row.can_update_audit) problems.push("the login can update audit_log");
+  if (!row.member) problems.push(`the login is not a member of ${APP_ROLE}`);
+  return problems;
+}
+
 export const MIGRATIONS_FOLDER = fileURLToPath(new URL("./migrations", import.meta.url));
 
 /** Applies every migration in packages/db/migrations. Connect as the schema owner, not the app role. */

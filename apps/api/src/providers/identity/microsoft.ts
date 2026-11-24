@@ -1,10 +1,12 @@
 import * as oidc from "openid-client";
+import type { Clock } from "../../clock";
 import { MICROSOFT_SCOPES, type IdentityProvider } from "./types";
 
 export interface MicrosoftOptions {
   tenantId: string;
   clientId: string;
   clientSecret: string;
+  clock: Clock;
 }
 
 /** Microsoft Entra ID through openid-client (discovery, PKCE, ID token validation, nonce and state checks). */
@@ -42,6 +44,9 @@ export function createMicrosoftIdentityProvider(options: MicrosoftOptions): Iden
     },
 
     async exchangeCode(exchange) {
+      const callback = new URL(exchange.callbackUrl.toString());
+      callback.search = "";
+      if (callback.toString() !== exchange.redirectUri) throw new Error("callback URL does not match the redirect URI");
       const tokens = await oidc.authorizationCodeGrant(await config(), exchange.callbackUrl, {
         pkceCodeVerifier: exchange.codeVerifier,
         expectedState: exchange.state,
@@ -50,7 +55,11 @@ export function createMicrosoftIdentityProvider(options: MicrosoftOptions): Iden
       });
       const claims = tokens.claims();
       if (claims === undefined) throw new Error("ID token missing");
-      const email = [claims.email, claims.preferred_username].find((value) => typeof value === "string");
+      // The UPN (preferred_username) is the tenant's sign-in name. The `email` claim is optional and editable,
+      // so it is only a fallback; the user is bound to the immutable `oid` after the first sign-in (services/auth.ts).
+      const email = [claims.preferred_username, claims.email].find(
+        (value): value is string => typeof value === "string" && value.includes("@"),
+      );
       const subject = typeof claims.oid === "string" ? claims.oid : claims.sub;
       if (email === undefined) throw new Error("ID token has no email");
       if (tokens.refresh_token === undefined) throw new Error("No refresh token (offline_access not granted)");
@@ -61,7 +70,7 @@ export function createMicrosoftIdentityProvider(options: MicrosoftOptions): Iden
         tokens: {
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token,
-          expiresAt: new Date(Date.now() + (tokens.expiresIn() ?? 3600) * 1000),
+          expiresAt: new Date(options.clock().getTime() + (tokens.expiresIn() ?? 3600) * 1000),
           scopes: (tokens.scope ?? MICROSOFT_SCOPES.join(" ")).split(" ").filter(Boolean),
         },
       };
