@@ -23,6 +23,7 @@ import { registerOutreachRoutes, registerUnsubscribeRoutes } from "./routes/outr
 import { createOutreachService, createUnsubscribeService } from "./services/outreach";
 import { registerMeetingRoutes } from "./routes/meetings";
 import { registerTodayRoutes } from "./routes/today";
+import { registerWebApp } from "./routes/web-app";
 import { createTodayService } from "./services/today";
 import { createMeetingsService } from "./services/meetings";
 import {
@@ -213,6 +214,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     registerMeetingRoutes(app, { meetings });
     registerTodayRoutes(app, { today: createTodayService({ db, ai, meetings, clock }) });
 
+    if (config.WEB_DIST_DIR !== undefined) registerWebApp(app, config.WEB_DIST_DIR);
     registerUnsubscribeRoutes(app, {
       unsubscribe: createUnsubscribeService({ db, secret: config.UNSUBSCRIBE_SECRET }),
       companyName: config.COMPANY_NAME,

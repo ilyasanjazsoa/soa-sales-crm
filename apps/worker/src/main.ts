@@ -18,6 +18,9 @@ import {
   runResearchBrief,
   runResearchFetch,
   runMailSend,
+  runMaintenance,
+  createRdsBackupChecker,
+  fakeBackupChecker,
   runProposalRender,
   runMailSync,
   sweepStuckMail,
@@ -128,7 +131,10 @@ await queue.boss.work<{ userId: string }>(JOBS.mailSync, async (jobs) => {
   }
 });
 // Every 2 minutes, one sync per connected user. Users who must reconnect are skipped until they do.
-const SYNC_EVERY_MS = 2 * 60 * 1000;
+// JOB_TICK_SECONDS (local and CI only) makes the ticks fast enough for the end-to-end journey.
+const fastTicks =
+  config.FAKE_PROVIDERS && config.JOB_TICK_SECONDS !== undefined ? config.JOB_TICK_SECONDS * 1000 : null;
+const SYNC_EVERY_MS = fastTicks ?? 2 * 60 * 1000;
 const tick = async () => {
   try {
     const swept = await sweepStuckMail(database.db, systemClock());
@@ -176,7 +182,7 @@ await queue.boss.work<{ proposalId: string }>(JOBS.proposalRender, async (jobs) 
   }
 });
 // Every 5 minutes: calendar.sync per connected user, and the 6 am prep refresh for today's meetings.
-const CALENDAR_EVERY_MS = 5 * 60 * 1000;
+const CALENDAR_EVERY_MS = fastTicks ?? 5 * 60 * 1000;
 const calendarTick = async () => {
   try {
     for (const userId of await syncableUsers(database.db)) await queue.send(JOBS.calendarSync, { userId });
@@ -188,12 +194,63 @@ const calendarTick = async () => {
 const calendarTimer = setInterval(() => void calendarTick(), CALENDAR_EVERY_MS);
 void calendarTick();
 
+// ───────── maintenance and health numbers (§14, §16) ─────────
+const backups =
+  config.FAKE_PROVIDERS || config.RDS_INSTANCE_ID === undefined
+    ? fakeBackupChecker
+    : createRdsBackupChecker({ region: config.AWS_REGION, instanceId: config.RDS_INSTANCE_ID });
+await queue.boss.work<{ day: string }>(JOBS.maintenanceNightly, async (jobs) => {
+  for (const job of jobs) {
+    const result = await runMaintenance({ db: database.db, clock: systemClock, backups });
+    // Numbers only; the backup alarm reads backupOk / backupAgeHours.
+    log.info({ job: JOBS.maintenanceNightly, day: job.data.day, ...result }, "maintenance done");
+  }
+});
+const COMPANY_ZONE = "America/Chicago";
+const healthTick = async () => {
+  try {
+    // 3 am company time: the nightly job (one per day: the queue keeps one per key).
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: COMPANY_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(systemClock());
+    const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+    if (get("hour") === "03")
+      await queue.send(JOBS.maintenanceNightly, { day: `${get("year")}-${get("month")}-${get("day")}` });
+
+    // For the alarms: the oldest waiting job per queue, and mailboxes that need reconnecting.
+    const ages = await database.pool.query<{ name: string; age: number }>(
+      "SELECT name, extract(epoch FROM now() - min(created_on))::int AS age FROM pgboss.job WHERE state = 'created' GROUP BY name",
+    );
+    const reconnect = await database.pool.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM oauth_accounts WHERE needs_reconnect",
+    );
+    log.info(
+      {
+        metric: "health",
+        oldestQueuedSeconds: Math.max(0, ...ages.rows.map((row) => row.age)),
+        needsReconnect: reconnect.rows[0]?.count ?? 0,
+      },
+      "health numbers",
+    );
+  } catch (error) {
+    log.error({ job: "health tick", err: failure(error) }, "tick failed");
+  }
+};
+const healthTimer = setInterval(() => void healthTick(), 5 * 60 * 1000);
+void healthTick();
+
 log.info({ jobs: Object.values(JOBS) }, "worker started");
 
 const shutdown = (signal: string) => {
   log.info({ signal }, "shutting down");
   clearInterval(syncTimer);
   clearInterval(calendarTimer);
+  clearInterval(healthTimer);
   void queue
     .stop()
     .then(() => database.close())
