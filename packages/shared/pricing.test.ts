@@ -82,3 +82,20 @@ describe("priceBreakdown", () => {
     expect(() => priceBreakdown(pkg(), SEED_PRICING, -0.1)).toThrow(RangeError);
   });
 });
+
+describe("pricingConfigFromRow", () => {
+  it("turns Postgres numeric strings into numbers and keeps the rest", async () => {
+    const { pricingConfigFromRow } = await import("./pricing");
+    const config = pricingConfigFromRow({
+      id: "cfg",
+      hourlyRateCents: { unarmed: 2900, armed: 3800 },
+      coverageHoursPerWeek: { "24_7": 168, nights: 84, business_hours: 60 },
+      supervisorMultiplier: "1.0500",
+      addons: { video: { label: "Remote video monitoring", monthlyCents: 220_000 } },
+      termDiscounts: { "12": 0, "24": 0.03, "36": 0.05 },
+      maxManualDiscount: "0.1000",
+    });
+    expect(config).toMatchObject({ id: "cfg", supervisorMultiplier: 1.05, maxManualDiscount: 0.1 });
+    expect(config.hourlyRateCents.armed).toBe(3800);
+  });
+});

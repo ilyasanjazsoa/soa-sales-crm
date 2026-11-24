@@ -48,6 +48,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - run: pnpm coverage:shared
       - run: pnpm --filter @soa/web build
       - run: pnpm audit --audit-level=high
 
