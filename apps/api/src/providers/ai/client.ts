@@ -49,6 +49,15 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const errorKind = (error: unknown) => (error instanceof Error ? error.name : "unknown");
 
+/** The JSON Schema for the forced tool, without the "$schema" marker Bedrock doesn't need. */
+function toolSchema(schema: ZodType): Record<string, unknown> {
+  const { $schema: _ignored, ...rest } = z.toJSONSchema(schema, { target: "draft-7", io: "input" }) as Record<
+    string,
+    unknown
+  >;
+  return rest;
+}
+
 export interface AiClient {
   generate: <T>(request: GenerateRequest<T>) => Promise<{ data: T; aiCallId: string }>;
   /** Throws 429 when the user has no AI calls left today (checked again on every call). */
@@ -78,14 +87,42 @@ export function createAiClient(deps: {
       const tool = {
         name: `submit_${request.feature}`,
         description: `Submit the ${request.feature.replace("_", " ")} result. Always answer by calling this tool.`,
-        inputSchema: z.toJSONSchema(request.schema, { target: "draft-7", io: "input" }) as Record<string, unknown>,
+        inputSchema: toolSchema(request.schema),
       };
       const messages = [...request.messages];
       let problems: string[] = [];
 
       for (let attempt = 1; attempt <= 2; attempt += 1) {
-        if (attempt === 2 && request.userId !== null) await assertWithinLimit(request.userId);
         const started = clock().getTime();
+        const requestRecord = { system: request.system, messages, tool: tool.name, attempt };
+        let aiCallId: string;
+        if (request.userId === null) {
+          aiCallId = await aiCallsRepo(db).insert(system, {
+            userId: null,
+            feature: request.feature,
+            model: modelId,
+            ok: false,
+            error: "pending",
+            request: requestRecord,
+          });
+        } else {
+          // Reserve the call against the daily limit atomically, before the model is called.
+          const reserved = await aiCallsRepo(db).reserve(
+            system,
+            {
+              userId: request.userId,
+              feature: request.feature,
+              model: modelId,
+              ok: false,
+              error: "pending",
+              request: requestRecord,
+            },
+            DAILY_AI_CALL_LIMIT,
+            new Date(clock().getTime() - DAY_MS),
+          );
+          if (reserved === undefined) throw aiLimitReached();
+          aiCallId = reserved;
+        }
         const controller = new AbortController();
         const timer = setTimeout(() => {
           controller.abort();
@@ -120,16 +157,12 @@ export function createAiClient(deps: {
           }
         }
 
-        const aiCallId = await aiCallsRepo(db).insert(system, {
-          userId: request.userId,
-          feature: request.feature,
-          model: modelId,
+        await aiCallsRepo(db).complete(system, aiCallId, {
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           latencyMs: clock().getTime() - started,
           ok: data !== undefined,
           error: failure ?? (problems.length > 0 ? "invalid_output" : null),
-          request: { system: request.system, messages, tool: tool.name, attempt },
           response: toolInput === undefined ? null : toolInput,
         });
 

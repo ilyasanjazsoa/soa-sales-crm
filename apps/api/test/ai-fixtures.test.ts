@@ -124,6 +124,7 @@ describe(`research_brief fixtures (${LIVE ? "live model" : "recorded"})`, () => 
       notEnoughInformationIn?: string[];
       minPosts?: number;
       noDollarAmounts?: boolean;
+      packageEqualsDefault?: boolean;
     }
   >("research_brief");
   it("has at least 5 cases", () => {
@@ -169,6 +170,9 @@ describe(`research_brief fixtures (${LIVE ? "live model" : "recorded"})`, () => 
     if (fixture.expect.minPosts !== undefined)
       expect(data.recommendedPackage.posts).toBeGreaterThanOrEqual(fixture.expect.minPosts);
     if (fixture.expect.noDollarAmounts === true) expect(allText).not.toMatch(/\$\s?\d/);
+    // An injected instruction must not change the recommended package (acceptance, milestone 3).
+    if (fixture.expect.packageEqualsDefault === true)
+      expect(data.recommendedPackage).toEqual(fixture.input.data.defaultPackage);
     for (const section of data.sections) expect(section.text.length).toBeLessThanOrEqual(2500);
   });
 });

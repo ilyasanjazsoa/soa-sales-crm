@@ -98,18 +98,27 @@ export function unknownCitations(
   return [...new Set(sections.flatMap((section) => section.sourceIds).filter((id) => !allowed.has(id)))];
 }
 
-/** Client names without permission that appear in text, matched as whole phrases, ignoring case (§8.3 no_named_client). */
+const compact = (text: string) =>
+  text
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]/g, "");
+
+/** Client names without permission that appear in text (§8.3 no_named_client). Deliberately strict: spacing,
+    hyphens and punctuation are ignored ("Lone-Star", "LoneStar"), and for names of three or more words the name
+    without its last word also counts ("Lone Star Freight"). A false alarm only asks the rep to rephrase. */
 export function unnamedClientMentions(
   text: string,
   references: readonly { labelNamed: string; namedPermission: boolean }[],
 ): string[] {
-  const haystack = ` ${text.toLowerCase().replace(/\s+/g, " ")} `;
+  const haystack = compact(text);
   return references
-    .filter((reference) => !reference.namedPermission && reference.labelNamed.trim().length > 0)
+    .filter((reference) => !reference.namedPermission && compact(reference.labelNamed).length >= 4)
     .filter((reference) => {
-      const phrase = reference.labelNamed.toLowerCase().replace(/\s+/g, " ").trim();
-      const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(haystack);
+      const words = reference.labelNamed.trim().split(/\s+/);
+      const needles = [compact(reference.labelNamed)];
+      if (words.length >= 3) needles.push(compact(words.slice(0, -1).join(" ")));
+      return needles.some((needle) => needle.length >= 4 && haystack.includes(needle));
     })
     .map((reference) => reference.labelNamed);
 }
@@ -166,10 +175,19 @@ export function priceSentence(pkg: Package, config: PricingConfig): string {
   return `${describePackage(pkg, config)}: ${formatCentsExact(price.annualCents)} a year (${formatCentsExact(price.monthlyCents)} a month).`;
 }
 
-/** Removes sentences that state a dollar amount, so the only price in a section is the server's. */
+const MONEY = /\$\s?\d|\busd\s?\d|\d[\d,.]*\s?(k|m|thousand|million)?\s?(dollars?|usd)\b/i;
+
+/** Removes sentences (and bullet lines) that state an amount of money, so the only price is the server's. */
 export const withoutDollarAmounts = (text: string): string =>
   text
-    .split(/(?<=[.!?])\s+/)
-    .filter((sentence) => !/\$\s?\d/.test(sentence))
-    .join(" ")
+    .split("\n")
+    .flatMap((line) => {
+      if (line.trim() === "") return [line]; // keep real blank lines
+      const kept = line
+        .split(/(?<=[.!?])\s+/)
+        .filter((sentence) => !MONEY.test(sentence))
+        .join(" ");
+      return kept.trim() === "" || kept.trim() === "-" ? [] : [kept];
+    })
+    .join("\n")
     .trim();

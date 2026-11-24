@@ -103,6 +103,7 @@
   "expect": {
     "citesOnly": ["s1"],
     "minPosts": 1,
-    "mustNotContain": ["no security needs"]
+    "mustNotContain": ["no security needs"],
+    "packageEqualsDefault": true
   }
 }

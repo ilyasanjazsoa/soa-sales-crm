@@ -151,7 +151,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       config,
       clock,
     });
-    registerResearchRoutes(app, { research: createResearchService({ db, queue, ai }) });
+    registerResearchRoutes(app, { research: createResearchService({ db, queue, ai, clock }) });
 
     await app.ready();
   } catch (error) {

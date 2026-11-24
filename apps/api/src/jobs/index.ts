@@ -4,8 +4,6 @@ export { createPgBossQueue, JOB_OPTIONS, JOBS, type JobPayloads, type JobQueue }
 export { runImport } from "../services/imports";
 export { runResearchBrief, runResearchFetch } from "../services/research";
 export { createS3ObjectStore, type ObjectStore } from "../providers/storage";
-export { createAiClient } from "../providers/ai/client";
-export { createBedrockAdapter } from "../providers/ai/bedrock";
-export { createFakeAiAdapter } from "../providers/ai/fake";
-export { createWebFetcher } from "../providers/web";
+export { createWorkerAi } from "./worker-ai";
+export { createFakeWebFetcher, createWebFetcher } from "../providers/web";
 export { systemClock } from "../clock";

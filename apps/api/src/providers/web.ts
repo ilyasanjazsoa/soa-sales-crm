@@ -1,3 +1,4 @@
+import type { LookupAddress } from "node:dns";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -5,11 +6,12 @@ import { isIP } from "node:net";
 
 /* Fetching a prospect's website (ARCHITECTURE.md §14 research.fetch). The fetched text is untrusted.
    Safety rules:
-   - http(s) on the default ports only; at most 8 pages; same host only; robots.txt obeyed.
+   - http(s) on the default ports only; at most 8 pages stored and 20 requests made; same site only;
+     robots.txt obeyed (also after redirects).
    - Every hostname is resolved and every address checked; private, loopback, link-local, CGNAT, multicast and
-     other special ranges are refused. The connection is made to the checked address (no DNS rebinding).
-   - At most 3 redirects, each one re-checked; a redirect to another host is refused.
-   - 10 s per request and 1 MB per response; only HTML and plain text are read. */
+     other special ranges are refused. The socket connects to the checked address (no DNS rebinding).
+   - At most 3 redirects, each one re-checked; a redirect to another site is refused.
+   - 10 s total per request (not an idle timeout) and 1 MB per response; only HTML and plain text are read. */
 
 export class FetchRefused extends Error {
   constructor(message: string) {
@@ -44,8 +46,10 @@ export type Transport = (
   options: { timeoutMs: number; maxBytes: number },
 ) => Promise<RawResponse>;
 
-const USER_AGENT = "SOA-CRM-Research/1.0 (+contact via company website)";
+const USER_AGENT = "SOA-CRM-Research/1.0";
 const MAX_PAGES = 8;
+const MAX_REQUESTS = 20;
+const MAX_QUEUE = 50;
 const MAX_REDIRECTS = 3;
 const TIMEOUT_MS = 10_000;
 const MAX_BYTES = 1024 * 1024;
@@ -89,24 +93,28 @@ function ipv6Groups(ip: string): number[] {
   return [...left, ...middle, ...right].map((group) => parseInt(group, 16));
 }
 
+const v4From = (high: number, low: number) =>
+  `${String(high >> 8)}.${String(high & 255)}.${String(low >> 8)}.${String(low & 255)}`;
+
 export function isPublicAddress(ip: string): boolean {
   const version = isIP(ip);
   if (version === 4) return !BLOCKED_V4.some(([base, bits]) => inV4(ip, base, bits)) && ip !== "255.255.255.255";
   if (version !== 6) return false;
   const g = ipv6Groups(ip);
   if (g.length !== 8 || g.some((part) => Number.isNaN(part))) return false;
-  const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, h7 = 0, h8 = 0] = g;
-  const embeddedV4 = `${String(h7 >> 8)}.${String(h7 & 255)}.${String(h8 >> 8)}.${String(h8 & 255)}`;
-  if (g.every((part) => part === 0)) return false; // ::
-  if (a === 0 && b === 0 && c === 0 && d === 0 && e === 0 && f === 0 && h7 === 0 && h8 === 1) return false; // ::1
-  if (a === 0 && b === 0 && c === 0 && d === 0 && e === 0 && f === 0xffff) return isPublicAddress(embeddedV4); // ::ffff:v4
-  if (a === 0 && b === 0 && c === 0 && d === 0 && e === 0 && f === 0) return false; // ::v4 (deprecated)
-  if (a === 0x64 && b === 0xff9b) return isPublicAddress(embeddedV4); // NAT64
-  if ((a & 0xfe00) === 0xfc00) return false; // fc00::/7 unique local
-  if ((a & 0xffc0) === 0xfe80) return false; // fe80::/10 link local
-  if ((a & 0xff00) === 0xff00) return false; // multicast
+  const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g7 = 0, g8 = 0] = g;
+  const zeroPrefix = a === 0 && b === 0 && c === 0 && d === 0;
+  if (zeroPrefix && e === 0 && f === 0xffff) return isPublicAddress(v4From(g7, g8)); // ::ffff:v4 (mapped)
+  if (zeroPrefix && e === 0xffff && f === 0) return isPublicAddress(v4From(g7, g8)); // ::ffff:0:v4 (translated)
+  if (zeroPrefix) return false; // ::, ::1, ::v4 and other reserved low addresses
+  if (a === 0x64 && b === 0xff9b) return isPublicAddress(v4From(g7, g8)); // NAT64 (64:ff9b::/96 and /48)
+  if (a === 0x0100 && b === 0 && c === 0 && d === 0) return false; // 100::/64 discard
+  if (a === 0x2001 && b < 0x0200) return false; // 2001::/23 special purpose (Teredo, ORCHID, benchmarking …)
   if (a === 0x2001 && b === 0x0db8) return false; // documentation
-  if (a === 0x2002) return isPublicAddress(`${String(b >> 8)}.${String(b & 255)}.${String(c >> 8)}.${String(c & 255)}`); // 6to4
+  if (a === 0x2002) return isPublicAddress(v4From(b, c)); // 6to4
+  if ((a & 0xfe00) === 0xfc00) return false; // fc00::/7 unique local
+  if ((a & 0xffc0) === 0xfe80 || (a & 0xffc0) === 0xfec0) return false; // link local, deprecated site local
+  if ((a & 0xff00) === 0xff00) return false; // multicast
   return true;
 }
 
@@ -116,11 +124,13 @@ export const systemResolver: Resolver = async (hostname) =>
 /** The one public address to connect to for this URL, or FetchRefused. */
 export async function checkTarget(url: URL, resolve: Resolver): Promise<string> {
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new FetchRefused("Only http and https are allowed.");
-  if (url.port !== "" && url.port !== (url.protocol === "https:" ? "443" : "80"))
+  if (url.port !== "" && url.port !== (url.protocol === "https:" ? "443" : "80")) {
     throw new FetchRefused("Only the standard ports are allowed.");
+  }
   if (url.username !== "" || url.password !== "") throw new FetchRefused("Addresses with credentials are not allowed.");
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  if (host === "" || host.toLowerCase() === "localhost" || host.toLowerCase().endsWith(".localhost")) {
+  const lower = host.toLowerCase().replace(/\.$/, "");
+  if (lower === "" || lower === "localhost" || lower.endsWith(".localhost")) {
     throw new FetchRefused("Local addresses are not allowed.");
   }
   const addresses = isIP(host) === 0 ? await resolve(host).catch(() => []) : [host];
@@ -130,19 +140,24 @@ export async function checkTarget(url: URL, resolve: Resolver): Promise<string> 
 }
 
 // ───────── transport ─────────
+type LookupCallback = (error: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void;
+
 export const nodeTransport: Transport = (url, address, options) =>
   new Promise((resolve, reject) => {
+    const family = isIP(address);
+    const host = url.hostname.replace(/^\[|\]$/g, "");
     const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(
       url,
       {
         method: "GET",
+        agent: false, // no shared keep-alive sockets: every request connects to its own checked address
         headers: { "user-agent": USER_AGENT, accept: "text/html,text/plain;q=0.9" },
-        // Connect to the address that was checked, never re-resolve.
-        lookup: (_hostname, _options, callback) => {
-          callback(null, address, isIP(address));
+        // Connect to the address that was checked, never re-resolve. Node 20+ asks with { all: true }.
+        lookup: (_hostname: string, lookupOptions: { all?: boolean }, callback: LookupCallback) => {
+          if (lookupOptions.all === true) callback(null, [{ address, family }]);
+          else callback(null, address, family);
         },
-        servername: isIP(url.hostname) === 0 ? url.hostname : undefined,
-        timeout: options.timeoutMs,
+        ...(isIP(host) === 0 ? { servername: host } : {}),
       },
       (response) => {
         const chunks: Buffer[] = [];
@@ -156,16 +171,22 @@ export const nodeTransport: Transport = (url, address, options) =>
           chunks.push(chunk);
         });
         response.on("close", () => {
+          clearTimeout(deadline);
           const headers: Record<string, string | undefined> = {};
-          for (const [key, value] of Object.entries(response.headers))
+          for (const [key, value] of Object.entries(response.headers)) {
             headers[key] = Array.isArray(value) ? value.join(", ") : value;
+          }
           resolve({ status: response.statusCode ?? 0, headers, body: Buffer.concat(chunks).toString("utf8") });
         });
         response.on("error", reject);
       },
     );
-    request.setTimeout(options.timeoutMs, () => request.destroy(new Error("timeout")));
-    request.on("error", reject);
+    // A total deadline, not an idle timeout: a server that drips bytes can't hold the request open.
+    const deadline = setTimeout(() => request.destroy(new Error("timeout")), options.timeoutMs);
+    request.on("error", (error) => {
+      clearTimeout(deadline);
+      reject(error);
+    });
     request.end();
   });
 
@@ -211,6 +232,7 @@ export function robotsDisallows(robots: string): string[] {
   return rules;
 }
 
+/** Same site: the same host, treating the bare domain and its www. form as one (the usual redirect). */
 const sameSite = (a: URL, b: URL) => a.hostname.replace(/^www\./, "") === b.hostname.replace(/^www\./, "");
 const PRIORITY = /about|security|news|press|propert|tenant|leasing|contact|amenit|location/i;
 
@@ -218,39 +240,44 @@ export function createWebFetcher(options: { resolve?: Resolver; transport?: Tran
   const resolve = options.resolve ?? systemResolver;
   const transport = options.transport ?? nodeTransport;
 
-  /** GET with checked redirects. */
-  const get = async (start: URL, origin: URL): Promise<{ url: URL; response: RawResponse }> => {
-    let url = start;
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-      if (!sameSite(url, origin)) throw new FetchRefused("Redirects to another site are not followed.");
-      const address = await checkTarget(url, resolve);
-      const response = await transport(url, address, { timeoutMs: TIMEOUT_MS, maxBytes: MAX_BYTES });
-      if (response.status >= 300 && response.status < 400 && response.headers.location !== undefined) {
-        url = new URL(response.headers.location, url);
-        continue;
-      }
-      return { url, response };
-    }
-    throw new FetchRefused("Too many redirects.");
-  };
-
   return {
     async fetchSite(startUrl) {
       const origin = new URL(startUrl);
       await checkTarget(origin, resolve); // refuse up front, before any request
+      let requests = 0;
+
+      /** GET with checked redirects; every request counts against the budget. */
+      const get = async (start: URL): Promise<{ url: URL; response: RawResponse }> => {
+        let url = start;
+        for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+          if (!sameSite(url, origin)) throw new FetchRefused("Redirects to another site are not followed.");
+          if (requests >= MAX_REQUESTS) throw new FetchRefused("Request limit reached.");
+          const address = await checkTarget(url, resolve);
+          requests += 1;
+          const response = await transport(url, address, { timeoutMs: TIMEOUT_MS, maxBytes: MAX_BYTES });
+          if (response.status >= 300 && response.status < 400 && response.headers.location !== undefined) {
+            url = new URL(response.headers.location, url);
+            continue;
+          }
+          return { url, response };
+        }
+        throw new FetchRefused("Too many redirects.");
+      };
+
+      // robots.txt: any failure (including a redirect to another host) means no rules, not no fetch.
       let disallowed: string[] = [];
       try {
-        const robots = await get(new URL("/robots.txt", origin), origin);
+        const robots = await get(new URL("/robots.txt", origin));
         if (robots.response.status === 200) disallowed = robotsDisallows(robots.response.body);
-      } catch (error) {
-        if (error instanceof FetchRefused) throw error;
+      } catch {
+        disallowed = [];
       }
       const allowed = (url: URL) => !disallowed.some((rule) => url.pathname.startsWith(rule));
 
       const queue: URL[] = [origin];
       const seen = new Set<string>();
       const pages: FetchedPage[] = [];
-      while (queue.length > 0 && pages.length < MAX_PAGES) {
+      while (queue.length > 0 && pages.length < MAX_PAGES && requests < MAX_REQUESTS) {
         const next = queue.shift();
         if (next === undefined) break;
         const key = `${next.hostname}${next.pathname}`;
@@ -258,11 +285,12 @@ export function createWebFetcher(options: { resolve?: Resolver; transport?: Tran
         seen.add(key);
         let fetched: { url: URL; response: RawResponse };
         try {
-          fetched = await get(next, origin);
+          fetched = await get(next);
         } catch (error) {
-          if (pages.length === 0) throw error; // the home page itself failed
+          if (next === origin) throw error; // the home page itself failed or was refused
           continue;
         }
+        if (!allowed(fetched.url)) continue; // redirected into a disallowed path
         const type = fetched.response.headers["content-type"] ?? "";
         if (fetched.response.status !== 200 || !/text\/(html|plain)/i.test(type)) continue;
         const { title, text, links } = /html/i.test(type)
@@ -280,9 +308,23 @@ export function createWebFetcher(options: { resolve?: Resolver; transport?: Tran
             }
           })
           .sort((x, y) => Number(PRIORITY.test(y.pathname)) - Number(PRIORITY.test(x.pathname)));
-        queue.push(...candidates);
+        for (const candidate of candidates) if (queue.length < MAX_QUEUE) queue.push(candidate);
       }
       return pages;
     },
+  };
+}
+
+/** FAKE_PROVIDERS: no request leaves the machine; returns one page saying so. */
+export function createFakeWebFetcher(): WebFetcher {
+  return {
+    fetchSite: (startUrl) =>
+      Promise.resolve([
+        {
+          url: new URL(startUrl).toString(),
+          title: "Website (fake fetch)",
+          text: "Local development: the website was not requested (FAKE_PROVIDERS=true). Add notes from calls or site visits instead.",
+        },
+      ]),
   };
 }

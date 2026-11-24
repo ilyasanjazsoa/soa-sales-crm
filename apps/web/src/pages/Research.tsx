@@ -43,6 +43,17 @@ function Lines({ text }: { text: string }) {
 function SourceItem({ source, index }: { source: ResearchSource; index: number }) {
   const [open, setOpen] = useState(false);
   const long = source.contentText.length > 400;
+  // A citation link (#src-<id>) opens the source it points to.
+  useEffect(() => {
+    const expandIfTargeted = () => {
+      if (window.location.hash === `#src-${source.id}`) setOpen(true);
+    };
+    expandIfTargeted();
+    window.addEventListener("hashchange", expandIfTargeted);
+    return () => {
+      window.removeEventListener("hashchange", expandIfTargeted);
+    };
+  }, [source.id]);
   return (
     <li
       id={`src-${source.id}`}
@@ -85,18 +96,18 @@ export function ResearchTab({ account }: { account: Account }) {
   const [signalText, setSignalText] = useState("");
   const [signalKind, setSignalKind] = useState<keyof typeof KIND_TONE>("incident");
   const [version, setVersion] = useState<number | null>(null);
-  const [readingUntil, setReadingUntil] = useState(0);
   const id = account.id;
 
   const sources = useQuery({
     queryKey: ["sources", id],
     queryFn: () => api(`/api/accounts/${id}/sources`, SourceList),
-    refetchInterval: () => (Date.now() < readingUntil ? 3000 : false),
+    refetchInterval: (query) => (query.state.data?.fetch.pending === true ? 3000 : false),
   });
+  const fetchState = sources.data?.fetch;
   const signals = useQuery({
     queryKey: ["signals", id],
     queryFn: () => api(`/api/accounts/${id}/signals`, SignalList),
-    refetchInterval: () => (Date.now() < readingUntil ? 3000 : false),
+    refetchInterval: () => (fetchState?.pending === true ? 3000 : false),
   });
   const brief = useQuery({
     queryKey: ["brief", id, version],
@@ -125,8 +136,8 @@ export function ResearchTab({ account }: { account: Account }) {
   });
   const readSite = useMutation({
     mutationFn: () => api(`/api/accounts/${id}/research/fetch`, JobAccepted, { method: "POST" }),
-    onSuccess: () => {
-      setReadingUntil(Date.now() + 60_000);
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["sources", id] });
     },
   });
   const addSignal = useMutation({
@@ -158,7 +169,7 @@ export function ResearchTab({ account }: { account: Account }) {
   const signalItems = signals.data?.items ?? [];
   const canBrief = sourceItems.length > 0 || signalItems.length > 0;
   const current = brief.data?.brief ?? null;
-  const reading = Date.now() < readingUntil;
+  const reading = fetchState?.pending === true;
 
   return (
     <div className="space-y-4">
@@ -195,6 +206,9 @@ export function ResearchTab({ account }: { account: Account }) {
           </p>
         )}
         {readSite.isError && <ErrorState error={readSite.error} />}
+        {fetchState?.lastError !== null && fetchState?.lastError !== undefined && !reading && (
+          <ErrorState error={new Error(fetchState.lastError)} />
+        )}
         {sources.isPending ? (
           <Loading />
         ) : sources.isError ? (
