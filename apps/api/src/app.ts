@@ -21,6 +21,12 @@ import { registerResearchRoutes } from "./routes/research";
 import { createResearchService } from "./services/research";
 import { registerOutreachRoutes, registerUnsubscribeRoutes } from "./routes/outreach";
 import { createOutreachService, createUnsubscribeService } from "./services/outreach";
+import { registerMeetingRoutes } from "./routes/meetings";
+import { createMeetingsService } from "./services/meetings";
+import { createCalendarProvider, createMapsProvider, createTokenRefresher } from "./providers/factories";
+import { createDriveTimes } from "./providers/maps/cache";
+import type { CalendarProvider } from "./providers/calendar/types";
+import type { MapsProvider } from "./providers/maps/types";
 import { createAiClient } from "./providers/ai/client";
 import { createBedrockAdapter } from "./providers/ai/bedrock";
 import { createFakeAiAdapter } from "./providers/ai/fake";
@@ -54,6 +60,9 @@ export interface BuildAppOptions {
   aiAdapter?: AiAdapter;
   /** Job queue; defaults to pg-boss in Postgres. */
   queue?: JobQueue;
+  /** Calendar and maps providers (tests); default from FAKE_PROVIDERS. */
+  calendar?: CalendarProvider;
+  maps?: MapsProvider;
   /** Refuse to start when the database login can bypass the app role (default: in production). */
   enforceAppRoleLogin?: boolean;
 }
@@ -155,6 +164,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     });
     registerResearchRoutes(app, { research: createResearchService({ db, queue, ai, clock }) });
     registerOutreachRoutes(app, { outreach: createOutreachService({ db, queue, ai, config, clock }) });
+    registerMeetingRoutes(app, {
+      meetings: createMeetingsService({
+        db,
+        queue,
+        ai,
+        calendar: options.calendar ?? createCalendarProvider(config),
+        driveTimes: createDriveTimes(options.maps ?? createMapsProvider(config), clock),
+        refresher: createTokenRefresher(config, clock),
+        cipher: createTokenCipher(config.TOKEN_ENC_KEY),
+        clock,
+      }),
+    });
     registerUnsubscribeRoutes(app, {
       unsubscribe: createUnsubscribeService({ db, secret: config.UNSUBSCRIBE_SECRET }),
       companyName: config.COMPANY_NAME,

@@ -1,5 +1,5 @@
 import { CircleAlert, Loader, RefreshCw, type LucideIcon } from "lucide-react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useEffect, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 /* Shared pieces in the demo's style: dark zinc, emerald = good, amber = pending, blue = AI, red = error. */
 
@@ -138,14 +138,21 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 
 export function Modal(props: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   const { title, onClose, children, wide = false } = props;
+  // Escape closes the dialog wherever focus is.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 sm:p-8"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") onClose();
       }}
     >
       <div

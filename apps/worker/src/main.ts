@@ -1,5 +1,12 @@
 import {
+  createCalendarProvider,
+  createDriveTimes,
   createFakeWebFetcher,
+  createMapsProvider,
+  createTokenRefresher,
+  queueMorningPrep,
+  runCalendarSync,
+  runPrepGenerate,
   createPgBossQueue,
   createTokenCipher,
   createWorkerMail,
@@ -133,11 +140,47 @@ const tick = async () => {
 const syncTimer = setInterval(() => void tick(), SYNC_EVERY_MS);
 void tick();
 
+// ───────── meetings (§9.2, §14) ─────────
+const meetingDeps = {
+  db: database.db,
+  ai,
+  calendar: createCalendarProvider(config),
+  driveTimes: createDriveTimes(createMapsProvider(config), systemClock),
+  refresher: createTokenRefresher(config, systemClock),
+  cipher: createTokenCipher(config.TOKEN_ENC_KEY),
+  clock: systemClock,
+};
+await queue.boss.work<{ userId: string }>(JOBS.calendarSync, async (jobs) => {
+  for (const job of jobs) {
+    try {
+      const result = await runCalendarSync(meetingDeps, job.data);
+      if (result.changed > 0)
+        log.info({ job: JOBS.calendarSync, id: job.id, changed: result.changed }, "calendar synced");
+    } catch (error) {
+      log.error({ job: JOBS.calendarSync, id: job.id, err: failure(error) }, "job failed");
+    }
+  }
+});
+await handle(JOBS.prepGenerate, (data) => runPrepGenerate(meetingDeps, data as unknown as { meetingId: string }));
+// Every 5 minutes: calendar.sync per connected user, and the 6 am prep refresh for today's meetings.
+const CALENDAR_EVERY_MS = 5 * 60 * 1000;
+const calendarTick = async () => {
+  try {
+    for (const userId of await syncableUsers(database.db)) await queue.send(JOBS.calendarSync, { userId });
+    await queueMorningPrep(database.db, queue, systemClock());
+  } catch (error) {
+    log.error({ job: "calendar tick", err: failure(error) }, "tick failed");
+  }
+};
+const calendarTimer = setInterval(() => void calendarTick(), CALENDAR_EVERY_MS);
+void calendarTick();
+
 log.info({ jobs: Object.values(JOBS) }, "worker started");
 
 const shutdown = (signal: string) => {
   log.info({ signal }, "shutting down");
   clearInterval(syncTimer);
+  clearInterval(calendarTimer);
   void queue
     .stop()
     .then(() => database.close())

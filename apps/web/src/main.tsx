@@ -6,6 +6,7 @@ import { ApiError } from "./api";
 import { Layout } from "./Layout";
 import { AdminPage } from "./pages/Admin";
 import { AccountPage } from "./pages/AccountPage";
+import { CalendarPage } from "./pages/CalendarPage";
 import { AdminReferencesPage } from "./pages/AdminReferences";
 import { AdminSuppressionsPage } from "./pages/AdminSuppressions";
 import { AdminUsersPage } from "./pages/AdminUsers";
@@ -51,12 +52,7 @@ const router = createBrowserRouter([
       { path: "prospects", element: <ProspectsPage /> },
       { path: "accounts/:id", element: <AccountPage /> },
       { path: "pipeline", element: <PipelinePage /> },
-      {
-        path: "calendar",
-        element: (
-          <ComingPage title="Calendar" milestone={5} what="A two-week view of CRM meetings and your busy time." />
-        ),
-      },
+      { path: "calendar", element: <CalendarPage /> },
       {
         path: "ask",
         element: (

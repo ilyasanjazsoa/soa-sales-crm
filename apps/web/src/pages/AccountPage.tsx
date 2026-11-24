@@ -33,6 +33,7 @@ import { z } from "zod";
 import { api, ApiError } from "../api";
 import { choosableStages, LoseDialog, needsOverrideReason, OverrideDialog, StagePill } from "../deal-ui";
 import { useMe } from "../session";
+import { MeetingsTab } from "./Meetings";
 import { OutreachTab } from "./Outreach";
 import { ResearchTab } from "./Research";
 import { Btn, Empty, ErrorState, Field, inputClass, Loading, Modal, Panel, Pill } from "../ui";
@@ -40,13 +41,7 @@ import { Btn, Empty, ErrorState, Field, inputClass, Loading, Modal, Panel, Pill 
 const TABS: { id: string; label: string; icon: LucideIcon; milestone?: number; what?: string }[] = [
   { id: "research", label: "Research", icon: Sparkles },
   { id: "outreach", label: "Outreach", icon: Send },
-  {
-    id: "meetings",
-    label: "Meetings",
-    icon: Calendar,
-    milestone: 5,
-    what: "Times that allow for drive time, booking, and the prep brief.",
-  },
+  { id: "meetings", label: "Meetings", icon: Calendar },
   {
     id: "proposal",
     label: "Proposal",
@@ -598,6 +593,8 @@ export function AccountPage() {
             <ResearchTab account={a} />
           ) : current?.id === "outreach" ? (
             <OutreachTab account={a} />
+          ) : current?.id === "meetings" ? (
+            <MeetingsTab account={a} />
           ) : (
             <Panel title={current?.label ?? ""} icon={current?.icon}>
               <p className="text-sm text-zinc-300">{current?.what}</p>

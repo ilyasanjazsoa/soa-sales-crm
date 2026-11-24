@@ -224,3 +224,39 @@ export function replyClassifyPrompt(reply: { subject: string; text: string }): {
     ],
   };
 }
+
+// ───────── prep_brief ─────────
+export interface PrepPromptData {
+  today: string;
+  meeting: { kind: string; startsLocal: string; durationMinutes: number; location: string | null };
+  account: {
+    name: string;
+    propertyType: string;
+    city: string | null;
+    currentProvider: string | null;
+    contractTiming: string | null;
+  };
+  attendees: { name: string; title: string | null }[];
+  dealStage: string | null;
+  signals: { text: string; confirmed: boolean }[];
+  /** The latest research brief's sections, if there is one. */
+  research: { heading: string; text: string }[];
+  /** Only the anonymized label (outreach rule 7 also applies to what the rep says in the room). */
+  reference: { label: string; stats: Record<string, unknown> } | null;
+}
+
+export function prepBriefPrompt(data: PrepPromptData): { system: string; messages: AdapterMessage[] } {
+  return {
+    system: [
+      "You write a one-page prep brief for a security guard company's sales rep before a meeting with a prospect.",
+      "Write exactly these five sections, each once, as short plain sentences or '- ' bullet lines (under 90 words each):",
+      "goal (what a good outcome of this meeting is), who_you_are_meeting (the attendees and what they likely care",
+      "about), agenda (3 to 5 steps that fit the meeting length), questions_to_ask (4 to 6 discovery questions),",
+      "bring (what to bring or prepare). Logistics are added by the system; do not write them.",
+      "Use only facts in <crm_data>; never invent names, numbers or events. Mention the reference only by its label.",
+      "Do not state prices or dollar amounts.",
+      CRM_DATA_INSTRUCTION,
+    ].join("\n"),
+    messages: [{ role: "user", text: `${crmDataBlock(data)}\n\nWrite the prep brief.` }],
+  };
+}
