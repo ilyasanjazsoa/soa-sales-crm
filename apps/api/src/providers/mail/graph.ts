@@ -1,14 +1,7 @@
 import { z } from "zod";
 import type { Clock } from "../../clock";
-import { MICROSOFT_SCOPES } from "../identity/types";
-import {
-  looksLikeBounce,
-  MailAuthError,
-  MailPermanentError,
-  type InboundMail,
-  type MailProvider,
-  type MailTokens,
-} from "./types";
+import { createMicrosoftTokenRefresher } from "../identity/refresh";
+import { looksLikeBounce, MailAuthError, MailPermanentError, type InboundMail, type MailProvider } from "./types";
 
 /* Microsoft Graph (DECISIONS.md decision 10). A message is created in the rep's mailbox and then sent, so the CRM
    learns its id and conversation id (the thread). Replies and delivery failures are read with an Inbox delta query;
@@ -34,11 +27,6 @@ const DeltaPage = z.object({
   "@odata.nextLink": z.string().optional(),
   "@odata.deltaLink": z.string().optional(),
 });
-const TokenResponse = z.object({
-  access_token: z.string(),
-  refresh_token: z.string().optional(),
-  expires_in: z.number(),
-});
 
 export interface GraphOptions {
   tenantId: string;
@@ -50,6 +38,7 @@ export interface GraphOptions {
 
 export function createGraphMailProvider(options: GraphOptions): MailProvider {
   const http = options.fetch ?? fetch;
+  const tokens = createMicrosoftTokenRefresher(options);
 
   const call = async (accessToken: string, url: string, init: RequestInit = {}) => {
     const response = await http(url.startsWith("https://") ? url : `${GRAPH}${url}`, {
@@ -127,31 +116,6 @@ export function createGraphMailProvider(options: GraphOptions): MailProvider {
       return { messages, cursor: url };
     },
 
-    async refresh(refreshToken): Promise<MailTokens> {
-      const response = await http(
-        `https://login.microsoftonline.com/${encodeURIComponent(options.tenantId)}/oauth2/v2.0/token`,
-        {
-          method: "POST",
-          signal: AbortSignal.timeout(TIMEOUT_MS),
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            client_id: options.clientId,
-            client_secret: options.clientSecret,
-            grant_type: "refresh_token",
-            refresh_token: refreshToken,
-            scope: MICROSOFT_SCOPES.join(" "),
-          }).toString(),
-        },
-      );
-      // invalid_grant and friends: the refresh token is expired or revoked, so only the rep can fix it.
-      if (response.status === 400 || response.status === 401) throw new MailAuthError();
-      if (!response.ok) throw new Error(`Token refresh failed (${String(response.status)})`);
-      const tokens = TokenResponse.parse(await response.json());
-      return {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token ?? refreshToken,
-        expiresAt: new Date(options.clock().getTime() + tokens.expires_in * 1000),
-      };
-    },
+    refresh: (refreshToken) => tokens.refresh(refreshToken),
   };
 }

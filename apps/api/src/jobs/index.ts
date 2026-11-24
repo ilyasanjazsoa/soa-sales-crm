@@ -10,3 +10,6 @@ export { systemClock } from "../clock";
 export { runMailSend, runMailSync, syncableUsers } from "../services/mail-jobs";
 export { createWorkerMail } from "./worker-mail";
 export { createTokenCipher } from "../auth/crypto";
+export { morningPrepDue, runCalendarSync, runPrepGenerate } from "../services/meetings";
+export { createCalendarProvider, createMapsProvider, createTokenRefresher } from "../providers/factories";
+export { createDriveTimes } from "../providers/maps/cache";

@@ -8,6 +8,8 @@ export const JOBS = {
   researchBrief: "research.brief",
   mailSend: "mail.send",
   mailSync: "mail.sync",
+  calendarSync: "calendar.sync",
+  prepGenerate: "prep.generate",
 } as const;
 export type JobName = (typeof JOBS)[keyof typeof JOBS];
 
@@ -17,6 +19,8 @@ export interface JobPayloads {
   "research.brief": { accountId: string; userId: string };
   "mail.send": { messageId: string };
   "mail.sync": { userId: string };
+  "calendar.sync": { userId: string };
+  "prep.generate": { meetingId: string };
 }
 
 export interface JobQueue {
@@ -33,6 +37,8 @@ export const JOB_OPTIONS: Record<JobName, { retryLimit: number; retryBackoff?: b
   "mail.send": { retryLimit: 3, retryBackoff: true, retryDelay: 30 },
   // The next tick is the retry.
   "mail.sync": { retryLimit: 0 },
+  "calendar.sync": { retryLimit: 0 },
+  "prep.generate": { retryLimit: 1 },
 };
 
 export async function createPgBossQueue(databaseUrl: string): Promise<JobQueue & { boss: PgBoss }> {
@@ -44,7 +50,8 @@ export async function createPgBossQueue(databaseUrl: string): Promise<JobQueue &
     boss,
     async send(name, data) {
       // One sync per user at a time: a tick while the last one is still queued is dropped.
-      const singleton = name === "mail.sync" ? { singletonKey: (data as { userId: string }).userId } : {};
+      const singleton =
+        name === "mail.sync" || name === "calendar.sync" ? { singletonKey: (data as { userId: string }).userId } : {};
       await boss.send(name, data, { ...JOB_OPTIONS[name], ...singleton });
     },
     async stop() {

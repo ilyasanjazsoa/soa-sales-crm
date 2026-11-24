@@ -1,5 +1,11 @@
 import { BRIEF_SECTIONS, NOT_ENOUGH_INFORMATION, type Package } from "@soa/shared";
-import { readCrmData, readSources, type BriefPromptData, type OutreachPromptData } from "./prompts";
+import {
+  readCrmData,
+  readSources,
+  type BriefPromptData,
+  type OutreachPromptData,
+  type PrepPromptData,
+} from "./prompts";
 import type { AdapterRequest, AiAdapter } from "./types";
 
 /* Fake AI adapter for local development and tests (FAKE_PROVIDERS=true). It answers from the structured input it
@@ -234,6 +240,45 @@ function fakeClassify(request: AdapterRequest): unknown {
   return { classification, summary: summaries[classification] };
 }
 
+function fakePrep(request: AdapterRequest): unknown {
+  const data = readCrmData(request.messages.map((message) => message.text).join("\n")) as PrepPromptData | undefined;
+  const name = data?.account.name ?? "the property";
+  const people = data?.attendees ?? [];
+  const confirmed = (data?.signals ?? []).filter((signal) => signal.confirmed).slice(0, 3);
+  return {
+    sections: [
+      { key: "goal", text: `Agree on the security gaps at ${name} and a next step toward a proposal.` },
+      {
+        key: "who_you_are_meeting",
+        text:
+          people.length === 0
+            ? NOT_ENOUGH_INFORMATION
+            : people.map((person) => `- ${person.name}${person.title === null ? "" : `, ${person.title}`}`).join("\n"),
+      },
+      {
+        key: "agenda",
+        text: "- Introductions and what prompted the meeting\n- Walk the site and its entry points\n- Current coverage and what isn't working\n- Next steps",
+      },
+      {
+        key: "questions_to_ask",
+        text: [
+          ...confirmed.map((signal) => `- How are you handling this today: ${signal.text}`),
+          "- Who else is involved in choosing a security provider?",
+          "- When does the current arrangement end?",
+          "- What would a great first 90 days look like?",
+        ].join("\n"),
+      },
+      {
+        key: "bring",
+        text:
+          data?.reference === null || data?.reference === undefined
+            ? "- Business cards and a notebook for the site walk"
+            : `- The ${data.reference.label} results\n- Business cards and a notebook for the site walk`,
+      },
+    ],
+  };
+}
+
 export function createFakeAiAdapter(
   options: { respond?: FakeResponder } = {},
 ): AiAdapter & { calls: AdapterRequest[] } {
@@ -258,7 +303,9 @@ export function createFakeAiAdapter(
                   ? fakeClaims(request)
                   : request.feature === "reply_classify"
                     ? fakeClassify(request)
-                    : {};
+                    : request.feature === "prep_brief"
+                      ? fakePrep(request)
+                      : {};
       return Promise.resolve({ toolInput, inputTokens: 0, outputTokens: 0 });
     },
   };

@@ -107,13 +107,19 @@ export function researchRepo(db: Executor) {
     },
 
     /** The latest research job event on an account (requested, failed), from the timeline. */
-    async lastJobEvent(scope: Scope, accountId: string, job: string) {
+    /** The latest timeline event of a job on the account; `meetingId` narrows it to one meeting's job. */
+    async lastJobEvent(scope: Scope, accountId: string, job: string, meetingId?: string) {
       const [row] = await db
         .select({ occurredAt: activities.occurredAt, meta: activities.meta })
         .from(activities)
         .innerJoin(accounts, eq(accounts.id, activities.accountId))
         .where(
-          and(eq(activities.accountId, accountId), accountVisible(scope), sql`${activities.meta}->>'job' = ${job}`),
+          and(
+            eq(activities.accountId, accountId),
+            accountVisible(scope),
+            sql`${activities.meta}->>'job' = ${job}`,
+            meetingId === undefined ? undefined : sql`${activities.meta}->>'meetingId' = ${meetingId}`,
+          ),
         )
         .orderBy(desc(activities.occurredAt))
         .limit(1);

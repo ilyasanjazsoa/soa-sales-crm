@@ -11,6 +11,7 @@ import { dealsRepo } from "../repos/deals";
 import { contactEmailRepo, emailsRepo, mailAccountsRepo, suppressionListRepo } from "../repos/outreach";
 import { systemScope } from "../repos/scope";
 import { mailAllowlist, unsubscribeAddress } from "./outreach";
+import { accessTokenFor } from "./oauth-tokens";
 import { unsubscribeUrl } from "./unsubscribe";
 
 /* The mail jobs (ARCHITECTURE.md §8.2, §8.4, §14). runMailSend is the only caller of MailProvider.send
@@ -26,36 +27,6 @@ export interface MailJobDeps {
 }
 
 const RECONNECT = "Reconnect your mailbox (sign out and sign in again), then press Retry.";
-const REFRESH_MARGIN_MS = 5 * 60 * 1000;
-
-/** A usable access token for the user, refreshed when close to expiry. "reconnect" when the rep must sign in again:
-    needs_reconnect is set and nothing retries until they do (§8.4). */
-export async function accessTokenFor(
-  deps: Pick<MailJobDeps, "db" | "mail" | "cipher" | "clock">,
-  userId: string,
-): Promise<{ accessToken: string; provider: "microsoft" | "google" } | "reconnect"> {
-  const scope = systemScope("mail token");
-  const repo = mailAccountsRepo(deps.db);
-  const row = await repo.get(scope, userId);
-  if (row === undefined || row.account.needsReconnect || !row.user.active) return "reconnect";
-  const { account } = row;
-  if (account.expiresAt.getTime() - deps.clock().getTime() > REFRESH_MARGIN_MS) {
-    return { accessToken: deps.cipher.decrypt(account.accessTokenEnc), provider: account.provider };
-  }
-  try {
-    const tokens = await deps.mail.refresh(deps.cipher.decrypt(account.refreshTokenEnc));
-    await repo.update(scope, userId, account.provider, {
-      accessTokenEnc: deps.cipher.encrypt(tokens.accessToken),
-      refreshTokenEnc: deps.cipher.encrypt(tokens.refreshToken),
-      expiresAt: tokens.expiresAt,
-    });
-    return { accessToken: tokens.accessToken, provider: account.provider };
-  } catch (error) {
-    if (!(error instanceof MailAuthError)) throw error; // network trouble: try again later
-    await repo.update(scope, userId, account.provider, { needsReconnect: true });
-    return "reconnect";
-  }
-}
 
 /** mail.send: sends one queued message. Permanent problems fail it at once; others are retried (3, exponential). */
 export async function runMailSend(
@@ -92,7 +63,7 @@ export async function runMailSend(
       return;
     }
 
-    const token = await accessTokenFor(deps, message.userId);
+    const token = await accessTokenFor({ ...deps, refresher: deps.mail }, message.userId);
     if (token === "reconnect") {
       await fail(RECONNECT);
       return;
@@ -137,7 +108,7 @@ export async function runMailSend(
 /** mail.sync: replies and bounces on CRM threads only. Any other mail is skipped and never stored or sent to AI. */
 export async function runMailSync(deps: MailJobDeps, job: { userId: string }): Promise<{ stored: number }> {
   const scope = systemScope("mail.sync");
-  const token = await accessTokenFor(deps, job.userId);
+  const token = await accessTokenFor({ ...deps, refresher: deps.mail }, job.userId);
   if (token === "reconnect") return { stored: 0 };
   const row = await mailAccountsRepo(deps.db).get(scope, job.userId);
   if (row === undefined) return { stored: 0 };

@@ -58,7 +58,7 @@ const MIN_LEAD_MS = 2 * 60 * 60 * 1000;
 const MINUTE = 60_000;
 
 // ───────── time zone helpers (Intl only, no library) ─────────
-interface LocalParts {
+export interface LocalParts {
   year: number;
   month: number;
   day: number;
@@ -85,6 +85,9 @@ function partsIn(date: Date, timeZone: string): LocalParts {
   const get = (type: string) => Number(formatter.formatToParts(date).find((part) => part.type === type)?.value);
   return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour"), minute: get("minute") };
 }
+
+/** The local calendar date and time of an instant in the zone. */
+export const localParts = (date: Date, timeZone: string): LocalParts => partsIn(date, timeZone);
 
 /** Offset of the zone from UTC at that instant, in ms. */
 function offsetMs(date: Date, timeZone: string): number {
