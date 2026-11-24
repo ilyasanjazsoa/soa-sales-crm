@@ -10,3 +10,4 @@ export * from "./stages";
 export * from "./ai";
 export * from "./research";
 export * from "./outreach";
+export * from "./slots";
