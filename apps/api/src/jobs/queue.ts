@@ -10,6 +10,7 @@ export const JOBS = {
   mailSync: "mail.sync",
   calendarSync: "calendar.sync",
   prepGenerate: "prep.generate",
+  proposalRender: "proposal.render",
 } as const;
 export type JobName = (typeof JOBS)[keyof typeof JOBS];
 
@@ -21,6 +22,7 @@ export interface JobPayloads {
   "mail.sync": { userId: string };
   "calendar.sync": { userId: string };
   "prep.generate": { meetingId: string };
+  "proposal.render": { proposalId: string };
 }
 
 export interface JobQueue {
@@ -39,6 +41,7 @@ export const JOB_OPTIONS: Record<JobName, { retryLimit: number; retryBackoff?: b
   "mail.sync": { retryLimit: 0 },
   "calendar.sync": { retryLimit: 0 },
   "prep.generate": { retryLimit: 1 },
+  "proposal.render": { retryLimit: 2 },
 };
 
 /** Syncs are per user and disposable: "stately" keeps at most one queued and one running job per user. */

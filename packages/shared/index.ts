@@ -12,3 +12,4 @@ export * from "./research";
 export * from "./outreach";
 export * from "./slots";
 export * from "./meetings";
+export * from "./proposals";

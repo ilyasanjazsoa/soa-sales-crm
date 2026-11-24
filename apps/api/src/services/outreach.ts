@@ -302,6 +302,31 @@ export function createOutreachService(deps: {
       });
     },
 
+    /** An email draft with text written by code (e.g. a proposal link), checked like any other and sent only by the
+        rep through the normal send path. Runs in the caller's transaction. */
+    async createWrittenDraft(
+      tx: Executor,
+      scope: UserScope,
+      input: { accountId: string; contactId: string; dealId: string | null; subject: string; body: string },
+    ): Promise<string> {
+      const contact = (await contactsRepo(tx).listForAccount(scope, input.accountId)).find(
+        (entry) => entry.id === input.contactId,
+      );
+      if (contact === undefined) throw notFound("That contact isn't on this account.");
+      const row = await draftsRepo(tx).insert(scope, {
+        accountId: input.accountId,
+        contactId: contact.id,
+        dealId: input.dealId,
+        userId: scope.userId,
+        channel: "email",
+        tone: "professional",
+        subject: input.subject,
+        body: input.body,
+      });
+      await draftsRepo(tx).update(scope, row.id, { checks: await checksFor(tx, scope, row, contact, undefined) });
+      return row.id;
+    },
+
     async getDraft(scope: UserScope, id: string): Promise<Draft> {
       const row = await loadOwn(db, scope, id);
       return toDraft(db, scope, row.draft, row.contact);
