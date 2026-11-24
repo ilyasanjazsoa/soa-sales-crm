@@ -35,10 +35,12 @@ export function describeError(error: unknown): Record<string, unknown> {
     }
   }
   if (error instanceof Error && error.stack !== undefined) {
+    // Only real stack frames: a multi-line message (e.g. "params: …" from the database driver) is dropped.
     described.at = error.stack
       .split("\n")
-      .slice(1, 4)
-      .map((line) => line.trim());
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("at "))
+      .slice(0, 3);
   }
   return described;
 }

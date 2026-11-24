@@ -7,7 +7,7 @@ describe("describeError", () => {
       code: "23505",
       constraint: "users_email_key",
     });
-    const error = new Error('Failed query: insert into "users" ... params: secret-body-text,token-123', { cause });
+    const error = new Error('Failed query: insert into "users" ...\nparams: secret-body-text,token-123', { cause });
     const described = describeError(error);
     expect(described).toMatchObject({ name: "Error", code: "23505", constraint: "users_email_key" });
     expect(JSON.stringify(described)).not.toContain("secret-body-text");
