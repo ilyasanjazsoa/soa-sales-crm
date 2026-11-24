@@ -7,3 +7,6 @@ export { createS3ObjectStore, type ObjectStore } from "../providers/storage";
 export { createWorkerAi } from "./worker-ai";
 export { createFakeWebFetcher, createWebFetcher } from "../providers/web";
 export { systemClock } from "../clock";
+export { runMailSend, runMailSync, sweepStuckMail, syncableUsers } from "../services/mail-jobs";
+export { createWorkerMail } from "./worker-mail";
+export { createTokenCipher } from "../auth/crypto";

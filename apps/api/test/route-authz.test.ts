@@ -25,6 +25,8 @@ interface Context {
   ae1DealId: string;
   ae1TaskId: string;
   ae1ImportId: string;
+  ae1DraftId: string;
+  ae1EmailId: string;
 }
 
 interface RouteCase {
@@ -81,8 +83,11 @@ const PUBLIC_ROUTES = new Set([
   "GET /api/auth/callback",
   "GET /api/auth/fake-idp",
   "POST /api/auth/fake-idp",
+  // Unsubscribe (§8.4): the signed token is the only credential.
+  "GET /u/:token",
+  "POST /u/:token",
 ]);
-const NON_API_ROUTES = new Set(["GET /healthz", "GET /readyz"]);
+const NON_API_ROUTES = new Set(["GET /healthz", "GET /readyz", "GET /u/:token", "POST /u/:token"]);
 
 const ROUTES: Record<string, RouteCase> = {
   "GET /healthz": { access: "public", path: () => "/healthz" },
@@ -329,6 +334,80 @@ const ROUTES: Record<string, RouteCase> = {
     asOtherAe: expectForbidden,
   },
   "GET /api/export/deals.csv": { access: "manager", path: () => "/api/export/deals.csv", asOtherAe: expectForbidden },
+
+  // ───────── outreach ─────────
+  "GET /api/accounts/:id/drafts": {
+    access: "session",
+    path: (ctx) => `/api/accounts/${ctx.ae1AccountId}/drafts`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/accounts/:id/drafts": {
+    access: "session",
+    path: (ctx) => `/api/accounts/${ctx.ae1AccountId}/drafts`,
+    body: (ctx) => ({ contactId: ctx.ae1ContactId, channel: "email" }),
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/drafts/:id": {
+    access: "session",
+    path: (ctx) => `/api/drafts/${ctx.ae1DraftId}`,
+    asOtherAe: expectNotFound,
+  },
+  "PATCH /api/drafts/:id": {
+    access: "session",
+    path: (ctx) => `/api/drafts/${ctx.ae1DraftId}`,
+    body: () => ({ body: "Hijacked" }),
+    asOtherAe: expectNotFound,
+  },
+  "DELETE /api/drafts/:id": {
+    access: "session",
+    path: (ctx) => `/api/drafts/${ctx.ae1DraftId}`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/drafts/:id/claims": {
+    access: "session",
+    path: (ctx) => `/api/drafts/${ctx.ae1DraftId}/claims`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/drafts/:id/regenerate": {
+    access: "session",
+    path: (ctx) => `/api/drafts/${ctx.ae1DraftId}/regenerate`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/drafts/:id/send": {
+    access: "session",
+    path: (ctx) => `/api/drafts/${ctx.ae1DraftId}/send`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/drafts/:id/log": {
+    access: "session",
+    path: (ctx) => `/api/drafts/${ctx.ae1DraftId}/log`,
+    body: () => ({ outcome: "connected" }),
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/accounts/:id/emails": {
+    access: "session",
+    path: (ctx) => `/api/accounts/${ctx.ae1AccountId}/emails`,
+    asOtherAe: expectNotFound,
+  },
+  "POST /api/emails/:id/retry": {
+    access: "session",
+    path: (ctx) => `/api/emails/${ctx.ae1EmailId}/retry`,
+    asOtherAe: expectNotFound,
+  },
+  "GET /api/suppressions": { access: "session", path: () => "/api/suppressions", asOtherAe: expectNothingOf },
+  "POST /api/suppressions": {
+    access: "manager",
+    path: () => "/api/suppressions",
+    body: () => ({ email: "planted@x.example" }),
+    asOtherAe: expectForbidden,
+  },
+  "DELETE /api/suppressions/:email": {
+    access: "manager",
+    path: () => "/api/suppressions/pat@first.example",
+    asOtherAe: expectForbidden,
+  },
+  "GET /u/:token": { access: "public", path: () => "/u/not-a-real-token" },
+  "POST /u/:token": { access: "public", path: () => "/u/not-a-real-token" },
 };
 
 const keyOf = (method: string, url: string) => `${method} ${url}`;
@@ -374,7 +453,17 @@ describe("route authorization (every /api route)", () => {
         "INSERT INTO imports (user_id, filename, object_key) VALUES ($1, 'first.csv', 'imports/first.csv') RETURNING id",
         [ae1.id],
       ),
+      ae1DraftId: "",
+      ae1EmailId: "",
     };
+    ctx.ae1DraftId = await one(
+      "INSERT INTO outreach_drafts (account_id, contact_id, user_id, channel, subject, body) VALUES ($1, $2, $3, 'email', 'Hello', 'First AE draft body') RETURNING id",
+      [accountId, ctx.ae1ContactId, ae1.id],
+    );
+    ctx.ae1EmailId = await one(
+      "INSERT INTO email_messages (user_id, account_id, direction, status, provider, from_email, to_email, subject, body_text, error) VALUES ($1, $2, 'out', 'failed', 'microsoft', 'first.ae@soa.example', 'pat@first.example', 'Hi', 'Body', 'x') RETURNING id",
+      [ae1.id, accountId],
+    );
     app = await testApp();
     ae1Session = await signIn(app, ae1.email);
     ae2Session = await signIn(app, ae2.email);

@@ -9,3 +9,4 @@ export * from "./properties";
 export * from "./stages";
 export * from "./ai";
 export * from "./research";
+export * from "./outreach";

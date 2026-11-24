@@ -139,3 +139,88 @@ export function readSources(text: string): { id: string; text: string }[] {
     text: unescape(match[2] ?? ""),
   }));
 }
+
+// ───────── outreach_draft ─────────
+export interface OutreachPromptData {
+  today: string;
+  channel: "email" | "call" | "voicemail" | "linkedin";
+  tone: "professional" | "friendly" | "direct";
+  account: { name: string; propertyType: string; city: string | null; currentProvider: string | null };
+  contact: { firstName: string; lastName: string; title: string | null };
+  dealStage: string | null;
+  /** Confirmed signals first. */
+  signals: { text: string; confirmed: boolean }[];
+  /** Only the anonymized label: the real client name is never given to the model for outreach (rule 7). */
+  reference: { label: string; stats: Record<string, unknown> } | null;
+  proposedTimes: string[];
+  rep: { name: string; title: string; phone: string | null };
+}
+
+const CHANNEL_RULES: Record<OutreachPromptData["channel"], string> = {
+  email:
+    "Write a short cold email: a subject (under 60 characters, sentence case, never 'Re:' or 'Fwd:') and a body of 80 to 150 words that ends with a clear, low-pressure ask. Do not add a signature, footer, address or unsubscribe line: the system adds them.",
+  call: "Write a call script for the rep: an opener, two discovery questions, a short value statement and the ask for a site walk. Subject is null.",
+  voicemail:
+    "Write a voicemail the rep can read in 20 seconds (about 50 words), ending with the rep's name and phone. Subject is null.",
+  linkedin: "Write a LinkedIn connection note of at most 280 characters, no links. Subject is null.",
+};
+
+export function outreachDraftPrompt(data: OutreachPromptData): { system: string; messages: AdapterMessage[] } {
+  return {
+    system: [
+      "You write outreach for a security guard company's sales rep to a commercial property contact.",
+      CHANNEL_RULES[data.channel],
+      `Tone: ${data.tone}.`,
+      "Use only facts in <crm_data>. Mention at most one or two signals, preferring confirmed ones; never present an",
+      "unconfirmed signal as certain. If a reference is given, describe it only with its label; never name any client.",
+      "Never promise or guarantee results, never use '100%', never criticise the current provider, and never state",
+      "a price or dollar amount.",
+      CRM_DATA_INSTRUCTION,
+    ].join("\n"),
+    messages: [{ role: "user", text: `${crmDataBlock(data)}\n\nWrite the ${data.channel} draft.` }],
+  };
+}
+
+// ───────── claim_check ─────────
+export function claimCheckPrompt(draft: { subject: string | null; body: string }): {
+  system: string;
+  messages: AdapterMessage[];
+} {
+  return {
+    system: [
+      "You review a sales message from a security guard company before it is sent.",
+      "List, word for word, any absolute claims (guarantees, '100%', 'never', 'always', promises of results) in",
+      "`absoluteClaims`, and any criticism of the prospect's current security provider in `disparagement`.",
+      "Return empty lists when there are none. Only report; never rewrite the message.",
+      UNTRUSTED_SOURCE_INSTRUCTION,
+    ].join("\n"),
+    messages: [
+      {
+        role: "user",
+        text: `The message:\n${wrapUntrusted("draft", `${draft.subject ?? ""}\n\n${draft.body}`)}\n\nReview it.`,
+      },
+    ],
+  };
+}
+
+// ───────── reply_classify ─────────
+export function replyClassifyPrompt(reply: { subject: string; text: string }): {
+  system: string;
+  messages: AdapterMessage[];
+} {
+  return {
+    system: [
+      "You classify a reply a prospect sent to a sales email. Pick one classification:",
+      "interested (wants to talk, meet or learn more), not_now (maybe later), not_interested, out_of_office",
+      "(an automatic away message), unsubscribe (asks to stop receiving email or be removed), other.",
+      "Add a one-line neutral summary of what the reply says, under 25 words, with no email addresses or phone numbers.",
+      UNTRUSTED_SOURCE_INSTRUCTION,
+    ].join("\n"),
+    messages: [
+      {
+        role: "user",
+        text: `The reply:\n${wrapUntrusted("reply", `${reply.subject}\n\n${reply.text.slice(0, 6000)}`)}\n\nClassify it.`,
+      },
+    ],
+  };
+}

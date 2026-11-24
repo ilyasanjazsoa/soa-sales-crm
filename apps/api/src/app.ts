@@ -19,6 +19,8 @@ import { registerUserRoutes } from "./routes/users";
 import { registerCrmRoutes } from "./routes/crm";
 import { registerResearchRoutes } from "./routes/research";
 import { createResearchService } from "./services/research";
+import { registerOutreachRoutes, registerUnsubscribeRoutes } from "./routes/outreach";
+import { createOutreachService, createUnsubscribeService } from "./services/outreach";
 import { createAiClient } from "./providers/ai/client";
 import { createBedrockAdapter } from "./providers/ai/bedrock";
 import { createFakeAiAdapter } from "./providers/ai/fake";
@@ -152,6 +154,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       clock,
     });
     registerResearchRoutes(app, { research: createResearchService({ db, queue, ai, clock }) });
+    registerOutreachRoutes(app, { outreach: createOutreachService({ db, queue, ai, config, clock }) });
+    registerUnsubscribeRoutes(app, {
+      unsubscribe: createUnsubscribeService({ db, secret: config.UNSUBSCRIBE_SECRET }),
+      companyName: config.COMPANY_NAME,
+      clock,
+    });
 
     await app.ready();
   } catch (error) {

@@ -6,9 +6,14 @@ import type { FastifyServerOptions } from "fastify";
 
 const SENSITIVE_QUERY = /^\/(api\/auth|p|u|webhooks)\//;
 
+/** Public token routes carry the token (an encoded email address) in the path. */
+const TOKEN_PATH = /^\/(u|p)\/[^/?]+/;
+
 export function urlForLog(url: string): string {
-  const [path = "", query] = url.split("?", 2);
-  return query !== undefined && SENSITIVE_QUERY.test(path) ? `${path}?[redacted]` : url;
+  const [rawPath = "", query] = url.split("?", 2);
+  const path = rawPath.replace(TOKEN_PATH, (_match, prefix: string) => `/${prefix}/[redacted]`);
+  if (query !== undefined && SENSITIVE_QUERY.test(rawPath)) return `${path}?[redacted]`;
+  return query === undefined ? path : `${path}?${query}`;
 }
 
 export function loggerOptions(config: Env): FastifyServerOptions["logger"] {

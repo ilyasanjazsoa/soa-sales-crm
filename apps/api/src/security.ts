@@ -29,7 +29,11 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
 
 export function registerSecurityHeaders(app: FastifyInstance): void {
   app.addHook("onSend", async (_request, reply) => {
-    for (const [name, value] of Object.entries(SECURITY_HEADERS)) void reply.header(name, value);
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      // A server-rendered page (e.g. /u/:token) may set its own policy: the same one plus a hash for its style.
+      if (name === "content-security-policy" && reply.hasHeader(name)) continue;
+      void reply.header(name, value);
+    }
   });
 }
 

@@ -1,5 +1,5 @@
 import { BRIEF_SECTIONS, NOT_ENOUGH_INFORMATION, type Package } from "@soa/shared";
-import { readCrmData, readSources, type BriefPromptData } from "./prompts";
+import { readCrmData, readSources, type BriefPromptData, type OutreachPromptData } from "./prompts";
 import type { AdapterRequest, AiAdapter } from "./types";
 
 /* Fake AI adapter for local development and tests (FAKE_PROVIDERS=true). It answers from the structured input it
@@ -159,6 +159,81 @@ function fakeBrief(request: AdapterRequest): unknown {
   };
 }
 
+function fakeDraft(request: AdapterRequest): unknown {
+  const data = readCrmData(request.messages.map((message) => message.text).join("\n")) as
+    OutreachPromptData | undefined;
+  if (data === undefined) return { subject: null, body: "Hello." };
+  const signal = data.signals.find((entry) => entry.confirmed) ?? data.signals[0];
+  const hook =
+    signal === undefined
+      ? ""
+      : ` I saw a note that ${signal.text.replace(/\.$/, "").replace(/^./, (c) => c.toLowerCase())}.`;
+  const proof = data.reference === null ? "" : ` A comparable site we look after: ${data.reference.label}.`;
+  const first = data.contact.firstName;
+  if (data.channel === "linkedin") {
+    return {
+      subject: null,
+      body: `Hi ${first}, I work with properties like ${data.account.name} on security coverage. Would you be open to connecting?`.slice(
+        0,
+        280,
+      ),
+    };
+  }
+  if (data.channel === "voicemail") {
+    return {
+      subject: null,
+      body: `Hi ${first}, this is ${data.rep.name} with Security Of America.${hook} I'd like to offer a short site walk at ${data.account.name}. You can reach me at ${data.rep.phone ?? "my office line"}. Thanks.`,
+    };
+  }
+  if (data.channel === "call") {
+    return {
+      subject: null,
+      body: `Opener: Hi ${first}, this is ${data.rep.name} with Security Of America.${hook}\nQuestion: How is coverage handled at ${data.account.name} today?\nQuestion: What would you change about it?\nAsk: Could we walk the site for 30 minutes next week?`,
+    };
+  }
+  return {
+    subject: `Security at ${data.account.name}`,
+    body: `Hi ${first},\n\nI lead security coverage for ${data.account.propertyType.toLowerCase()} properties${data.account.city === null ? "" : ` around ${data.account.city}`}.${hook}${proof}\n\nWould you be open to a 30-minute site walk next week? I can share what we would recommend for ${data.account.name}.`,
+  };
+}
+
+function fakeClaims(request: AdapterRequest): unknown {
+  const [draft] = readSources(request.messages.map((message) => message.text).join("\n"));
+  const text = draft?.text ?? "";
+  const absoluteClaims = [...text.matchAll(/[^.!?\n]*\b(guarantee[sd]?|100%|never fail)[^.!?\n]*/gi)].map((match) =>
+    match[0].trim(),
+  );
+  const disparagement = [...text.matchAll(/[^.!?\n]*\b(unreliable|terrible|worse than|incompetent)[^.!?\n]*/gi)].map(
+    (match) => match[0].trim(),
+  );
+  return { absoluteClaims: absoluteClaims.slice(0, 5), disparagement: disparagement.slice(0, 5) };
+}
+
+function fakeClassify(request: AdapterRequest): unknown {
+  const [reply] = readSources(request.messages.map((message) => message.text).join("\n"));
+  const text = reply?.text ?? "";
+  const classification = /unsubscribe|remove me|stop (emailing|sending)/i.test(text)
+    ? "unsubscribe"
+    : /out of (the )?office|away until|automatic reply/i.test(text)
+      ? "out_of_office"
+      : /not interested|no thanks|no, thank/i.test(text)
+        ? "not_interested"
+        : /next (year|quarter)|not right now|maybe later|circle back/i.test(text)
+          ? "not_now"
+          : /interested|let'?s (talk|meet)|sounds good|call me|happy to|set up a time/i.test(text)
+            ? "interested"
+            : "other";
+  const summaries: Record<string, string> = {
+    unsubscribe: "Asks to stop receiving email.",
+    out_of_office: "Automatic away message.",
+    not_interested: "Says they are not interested.",
+    not_now: "Not now; open to talking later.",
+    interested: "Interested and open to a conversation.",
+    other: "A reply that needs a look.",
+  };
+  return { classification, summary: summaries[classification] };
+}
+
 export function createFakeAiAdapter(
   options: { respond?: FakeResponder } = {},
 ): AiAdapter & { calls: AdapterRequest[] } {
@@ -177,7 +252,13 @@ export function createFakeAiAdapter(
             ? fakeSignals(request)
             : request.feature === "research_brief"
               ? fakeBrief(request)
-              : {};
+              : request.feature === "outreach_draft"
+                ? fakeDraft(request)
+                : request.feature === "claim_check"
+                  ? fakeClaims(request)
+                  : request.feature === "reply_classify"
+                    ? fakeClassify(request)
+                    : {};
       return Promise.resolve({ toolInput, inputTokens: 0, outputTokens: 0 });
     },
   };
