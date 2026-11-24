@@ -393,9 +393,14 @@ describe("search", () => {
 
   it("returns the first page in under 300 ms with 50,000 accounts", async () => {
     const { first, firstSession } = await twoAes();
+    // 50,000 varied, realistic names (20 × 13 word pairs, numbered).
     await ownerQuery(
       `INSERT INTO accounts (name, property_type, city, owner_user_id, fit_score)
-       SELECT 'Prospect ' || g || ' ' || (ARRAY['Logistics Park','Cold Storage','Medical Center','Plaza'])[1 + g % 4],
+       SELECT (ARRAY['Ashford','Birchwood','Calloway','Dunmore','Elmhurst','Fairview','Glenrock','Hartwell','Ironside','Juniper',
+                     'Kingsley','Larkspur','Maplecrest','Northgate','Oakmont','Pinecrest','Quarry','Redstone','Silverton','Thornbury'])[1 + g % 20]
+              || ' ' || (ARRAY['Ridge','Point','Crossing','Commons','Landing','Square','Heights','Park','Station','Yards',
+                               'Harbor','Grove','Terrace'])[1 + (g / 20) % 13]
+              || ' ' || g || ' ' || (ARRAY['Logistics Park','Cold Storage','Medical Center','Plaza'])[1 + g % 4],
               (ARRAY['Industrial','Cold chain warehouse','Medical office','Class A office'])[1 + g % 4],
               (ARRAY['Irving','Plano','Dallas','Frisco','Garland'])[1 + g % 5],
               CASE WHEN g % 3 = 0 THEN $1::uuid ELSE NULL END,
@@ -407,7 +412,7 @@ describe("search", () => {
     const timings: Record<string, number> = {};
     for (const url of [
       "/api/accounts",
-      "/api/accounts?q=Prospet%2012345",
+      "/api/accounts?q=Ashfrod%20Ridge%2012480",
       "/api/accounts?type=Industrial&minFit=50&owner=me",
     ]) {
       await app.inject({ method: "GET", url, ...as(firstSession) }); // warm up

@@ -30,13 +30,14 @@ export function accountsRepo(db: Executor) {
       let rank: SQL | undefined;
       if (q !== undefined && q !== "") {
         const pattern = `%${escapeLike(q)}%`;
+        // Name matches go through the trigram index; owner and city are a plain scan. A single OR across all
+        // three would force a scan that scores every row, so the two are combined as a union of ids.
         conditions.push(
-          anyOf(
-            ilike(accounts.name, pattern),
-            sql`${q} <% ${accounts.name}`,
-            ilike(accounts.ownerCompany, pattern),
-            ilike(accounts.city, pattern),
-          ),
+          sql`${accounts.id} IN (
+            SELECT id FROM ${accounts} WHERE ${ilike(accounts.name, pattern)} OR ${q} <% ${accounts.name}
+            UNION
+            SELECT id FROM ${accounts} WHERE ${anyOf(ilike(accounts.ownerCompany, pattern), ilike(accounts.city, pattern))}
+          )`,
         );
         rank = sql`word_similarity(${q}, ${accounts.name})`;
       }
@@ -73,9 +74,9 @@ export function accountsRepo(db: Executor) {
           .limit(query.limit + 1);
 
       if (rank === undefined) return run(db);
-      // Use the trigram index for `<%` with a threshold that accepts a one-letter typo.
+      // Use the trigram index for `<%`; 0.5 accepts a one-letter typo while staying selective.
       return db.transaction(async (tx) => {
-        await tx.execute(sql`SET LOCAL pg_trgm.word_similarity_threshold = 0.4`);
+        await tx.execute(sql`SET LOCAL pg_trgm.word_similarity_threshold = 0.5`);
         return run(tx);
       });
     },
